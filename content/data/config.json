@@ -1,0 +1,95 @@
+{
+    "type": "Config",
+    "favicon": "/images/favicon.svg",
+    "header": {
+        "type": "Header",
+        "headerVariant": "variant-c",
+        "isSticky": false,
+        "title": "Kaining Gao",
+        "isTitleVisible": true,
+        "primaryLinks": [
+            {
+                "type": "Link",
+                "label": "About",
+                "url": "/info"
+            },
+            {
+                "type": "Link",
+                "label": "Projects",
+                "url": "/projects"
+            },
+            {
+                "type": "Link",
+                "label": "Blog",
+                "url": "/blog"
+            }
+        ],
+        "socialLinks": [
+            {
+                "type": "Social",
+                "altText": "GitHub",
+                "label": "GitHub",
+                "url": "https://github.com/KainingGao",
+                "icon": "github"
+            },
+            {
+                "type": "Social",
+                "altText": "LinkedIn",
+                "label": "LinkedIn",
+                "url": "https://linkedin.com/in/kaining-gao",
+                "icon": "linkedin"
+            }
+        ],
+        "styles": {
+            "self": {
+                "width": "full"
+            }
+        }
+    },
+    "footer": {
+        "type": "Footer",
+        "primaryLinks": [
+            {
+                "type": "Link",
+                "label": "About",
+                "url": "/info",
+                "altText": ""
+            },
+            {
+                "type": "Link",
+                "label": "Contact",
+                "url": "mailto:gaokaining22@gmail.com",
+                "altText": ""
+            },
+            {
+                "type": "Link",
+                "label": "Blog",
+                "url": "/blog",
+                "altText": ""
+            },
+            {
+                "type": "Link",
+                "label": "GitHub",
+                "url": "https://github.com/KainingGao",
+                "altText": "My GitHub"
+            }
+        ],
+        "contacts": {
+            "type": "ContactBlock",
+            "title": "Contact details",
+            "phoneNumber": "641-780-5653",
+            "phoneAltText": "My phone number",
+            "email": "gaokaining22@gmail.com",
+            "emailAltText": "My email",
+            "address": "Des Moines, Iowa",
+            "addressAltText": "My location"
+        },
+        "copyrightText": "© 2025 Kaining Gao. All rights reserved.",
+        "styles": {
+            "self": {
+                "width": "narrow",
+                "padding": ["pt-16", "pb-16", "pr-4", "pl-4"]
+            }
+        }
+    }
+}
