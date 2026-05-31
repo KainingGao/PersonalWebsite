@@ -16,10 +16,12 @@ sections:
     text: >-
       ## Hi, I'm Kaining Gao
 
-      I'm a Computer Science student at Iowa State University (expected graduation: May 2026). 
-      Currently working as a Research Assistant at ISU's NextGen PPT Lab, where I develop tools 
-      for 3D hand model measurement and analysis. I'm passionate about full-stack web development, 
-      with experience in React, Next.js, Java Spring Boot, and more.
+      I'm a Computer Science student at Iowa State University with a 3.6 GPA and an expected
+      graduation date of May 2026. I build full-stack software with Java, JavaScript,
+      Python, SQL, React, Next.js, Spring Boot, Node.js, AWS, MySQL, and PostgreSQL.
+
+      My recent work spans research software for 3D hand model analysis, cloud ERP
+      customizations, REST APIs, database-backed applications, and AI product tooling.
     media:
       type: ImageBlock
       url: /images/about.jpg
@@ -65,23 +67,23 @@ sections:
     subtitle: 'Experience with these technologies:'
     images:
       - type: ImageBlock
-        url: /images/react-logo.svg
+        url: /images/logo1.svg
         altText: React
         caption: React
       - type: ImageBlock
-        url: /images/next-logo.svg
+        url: /images/logo2.svg
         altText: Next.js
         caption: Next.js
       - type: ImageBlock
-        url: /images/java-logo.svg
+        url: /images/logo3.svg
         altText: Java
         caption: Java
       - type: ImageBlock
-        url: /images/python-logo.svg
+        url: /images/logo4.svg
         altText: Python
         caption: Python
       - type: ImageBlock
-        url: /images/mysql-logo.svg
+        url: /images/logo5.svg
         altText: MySQL
         caption: MySQL
     spacing: 3
@@ -189,19 +191,41 @@ sections:
       - type: Label
         label: 'JavaScript'
       - type: Label
-        label: 'React'
-      - type: Label
-        label: 'Next.js'
-      - type: Label
-        label: 'Spring Boot'
-      - type: Label
         label: 'Python'
       - type: Label
         label: 'SQL'
       - type: Label
-        label: 'MongoDB'
+        label: 'HTML'
+      - type: Label
+        label: 'C'
+      - type: Label
+        label: 'C++'
+      - type: Label
+        label: 'React'
+      - type: Label
+        label: 'Next.js'
+      - type: Label
+        label: 'Node.js'
+      - type: Label
+        label: 'Spring Boot'
+      - type: Label
+        label: 'FastAPI'
       - type: Label
         label: 'RESTful API'
+      - type: Label
+        label: 'AWS'
+      - type: Label
+        label: 'PostgreSQL'
+      - type: Label
+        label: 'MySQL'
+      - type: Label
+        label: 'WebSocket'
+      - type: Label
+        label: 'Postman'
+      - type: Label
+        label: 'JUnit'
+      - type: Label
+        label: 'Maven'
       - type: Label
         label: 'Git'
   - type: DividerSection
@@ -240,20 +264,19 @@ sections:
       - type: FeaturedItem
         subtitle: 'Experience:'
         text: |-
-          **ISU NextGen PPT Lab (Feb 2025 - Present)**
-          * Research Assistant
-          * Developing automated workflows for 3D hand model measurement
-          * Creating React web apps for biometric measurements
+          **ISU NextGen PPT Lab, Research Assistant (Feb 2025 - Present)**
+          * Built an automated 3D hand model analysis system in Python, increasing measurement speed by 400%.
+          * Maintain an AWS-hosted FastAPI backend with AI processing and PostgreSQL for a healthcare application.
+          * Collaborate with the research team to standardize measurement protocols and improve data accuracy.
 
-          **Vermeer (May - Aug 2024)**
-          * Parts Picker
-          * Utilized inventory systems to track parts and order statuses
-          * Coordinated with team members to streamline processes
+          **Kingdee Cloud, Software Developer Intern (Jun 2025 - Aug 2025)**
+          * Engineered 10+ Java-based ERP plugins for HR, contract, and inventory workflows.
+          * Developed and tested an inventory management module with Java and complex SQL queries.
+          * Managed Linux deployment work for ERP customizations across 5+ production releases.
 
-          **S.V.E Education (May - Aug 2019)**
-          * English Teaching Assistant
-          * Supported lead teachers with English lessons for non-native speakers
-          * Created engaging lesson materials
+          **NovaCode, Tutor (Aug 2025 - Present)**
+          * Create customized computer science curriculum for competitive programming preparation.
+          * Teach algorithms and coding principles through accessible, problem-solving-focused lessons.
         styles:
           self:
             textAlign: left
@@ -267,7 +290,8 @@ sections:
         text: |-
           **Iowa State University (Aug 2022 - May 2026)**
           * B.S. in Computer Science
-          * Relevant coursework: Data Structures, Algorithms, Database Systems, Web Development, Software Engineering
+          * GPA: 3.6
+          * Ames, Iowa
         styles:
           self:
             textAlign: left
@@ -316,7 +340,7 @@ sections:
         borderStyle: solid
   - type: ContactSection
     backgroundSize: full
-    title: "Let's connect! 💬"
+    title: "Let's connect."
     colors: colors-f
     form:
       type: FormBlock
@@ -350,7 +374,7 @@ sections:
           isRequired: true
           width: full
           type: TextareaFormControl
-      submitLabel: "Send message 🚀"
+      submitLabel: "Send message"
       styles:
         submitLabel:
           textAlign: center

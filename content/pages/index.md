@@ -14,11 +14,12 @@ sections:
     colors: colors-f
     backgroundSize: full
     title: >-
-      I'm a computer science student, developer, and researcher with a passion for
-      building web applications and exploring new technologies.
+      Kaining Gao is a computer science student building full-stack products, AI tools,
+      and research software.
     subtitle: >-
-      Currently working on research at Iowa State University's NextGen PPT Lab, where I'm developing
-      tools to analyze 3D hand models with both Python and React applications.
+      Iowa State University B.S. Computer Science candidate, May 2026. I work across
+      Java Spring Boot, Next.js, Python, SQL, AWS, and PostgreSQL, with current research
+      focused on automated 3D hand model analysis at ISU's NextGen PPT Lab.
     styles:
       self:
         height: auto
@@ -45,7 +46,13 @@ sections:
       actions:
         justifyContent: flex-start
     type: HeroSection
-    actions: []
+    actions:
+      - type: Link
+        label: Resume
+        url: /resume-kaining-gao.pdf
+      - type: Link
+        label: Contact
+        url: mailto:gaokaining22@gmail.com
   - colors: colors-f
     type: FeaturedProjectsSection
     elementId: ''
@@ -59,9 +66,9 @@ sections:
     showReadMoreLink: true
     variant: variant-b
     projects:
-      - content/pages/projects/movie-search.md
-      - content/pages/projects/event-finder.md
-      - content/pages/projects/user-manual.md
+      - content/pages/projects/project-three.md
+      - content/pages/projects/project-two.md
+      - content/pages/projects/project-one.md
     styles:
       self:
         height: auto
@@ -95,9 +102,8 @@ sections:
         label: See all posts
         url: /blog
     posts:
-      - content/pages/blog/nextjs-insights.md
-      - content/pages/blog/react-tips.md
-      - content/pages/blog/java-development.md
+      - content/pages/blog/post-one.md
+      - content/pages/blog/post-two.md
     showDate: true
     showExcerpt: true
     showReadMoreLink: true
@@ -129,7 +135,7 @@ sections:
   - type: ContactSection
     colors: colors-f
     backgroundSize: full
-    title: "Got any interesting opportunities? Let's talk! 💬"
+    title: "Got an interesting opportunity? Let's talk."
     form:
       type: FormBlock
       elementId: contact-form
@@ -167,7 +173,7 @@ sections:
           isRequired: false
           width: full
           type: CheckboxFormControl
-      submitLabel: "Submit 🚀"
+      submitLabel: "Submit"
       styles:
         submitLabel:
           textAlign: center

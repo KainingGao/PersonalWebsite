@@ -5,7 +5,7 @@ colors: colors-a
 date: '2024-08-10'
 client: Academic Project
 description: >-
-  An Android application that enables users to discover, post, and schedule events, built with Java Spring Boot backend and MySQL database integration.
+  An event discovery application backed by 20+ Java Spring Boot REST APIs, a MySQL schema designed from scratch, and Agile collaboration with an Android frontend team.
 featuredImage:
   type: ImageBlock
   url: /images/bg2.jpg
@@ -18,7 +18,7 @@ media:
 
 ## Project Overview
 
-The Event Finder App is a mobile application that allows users to discover local events, create and post new events, and manage their event schedules. This project was developed as part of a team during my coursework at Iowa State University.
+The Event Finder App helps users discover, post, and manage events. I engineered the backend for the application during coursework at Iowa State University, building the API layer and database model used by the Android frontend team.
 
 ### Key Technologies
 
@@ -30,7 +30,7 @@ The Event Finder App is a mobile application that allows users to discover local
 
 ### Features
 
-- User authentication and account management
+- 20+ RESTful endpoints for user authentication, event CRUD operations, and search
 - Event discovery with search and filtering options
 - Event creation and posting
 - Personal event schedule management
@@ -39,7 +39,7 @@ The Event Finder App is a mobile application that allows users to discover local
 
 ## Development Process
 
-This project followed an Agile development methodology, with regular sprints and team meetings to ensure progress and address challenges. As a team member, I was primarily responsible for developing the Spring Boot backend and database integration.
+This project followed an Agile development methodology, with regular sprints and team meetings to ensure progress and address challenges. I was primarily responsible for developing the Spring Boot backend, designing the MySQL database schema, and collaborating with the Android frontend team to define API contracts.
 
 ### Backend Development
 
@@ -58,7 +58,7 @@ I implemented RESTful API endpoints that allowed the Android frontend to:
 
 ### Database Design
 
-The MySQL database was designed with the following main tables:
+I designed the MySQL database schema from scratch with 5 relational tables:
 
 - Users (user accounts and profiles)
 - Events (event details and metadata)
