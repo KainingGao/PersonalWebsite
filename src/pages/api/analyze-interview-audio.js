@@ -1,3 +1,5 @@
+import { getUserProfile, spendBalanceMinutes } from "../../lib/userStore";
+
 export const config = {
     api: {
         bodyParser: {
@@ -220,7 +222,9 @@ export default async function handler(req, res) {
         situation = "",
         notes = "",
         history = [],
-        questionBuffer = ""
+        questionBuffer = "",
+        userId = "",
+        durationSeconds = 0
     } = req.body || {};
 
     if (!audioBase64) {
@@ -228,6 +232,19 @@ export default async function handler(req, res) {
     }
 
     try {
+        let profile = null;
+
+        if (userId) {
+            profile = await getUserProfile(userId);
+
+            if (profile.balanceMinutes <= 0) {
+                return res.status(402).json({
+                    error: "Your interview balance is empty. Add minutes from the dashboard.",
+                    profile
+                });
+            }
+        }
+
         const transcription = await transcribeAudio({ audioBase64, mimeType });
         const segments = normalizeSegments(transcription.segments);
         const transcript =
@@ -247,8 +264,14 @@ export default async function handler(req, res) {
                 answer: "",
                 bullets: [],
                 followUp: "",
-                reason: "No speech was detected."
+                reason: "No speech was detected.",
+                profile
             });
+        }
+
+        if (userId && durationSeconds > 0) {
+            const spend = await spendBalanceMinutes(userId, Number(durationSeconds) / 60);
+            profile = spend.profile;
         }
 
         const decision = await decideAndAnswer({
@@ -272,7 +295,8 @@ export default async function handler(req, res) {
             answer: decision.answer || "",
             bullets: Array.isArray(decision.bullets) ? decision.bullets : [],
             followUp: decision.followUp || "",
-            reason: decision.reason || ""
+            reason: decision.reason || "",
+            profile
         });
     } catch (error) {
         return res.status(500).json({

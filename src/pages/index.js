@@ -7,6 +7,61 @@ const DEFAULT_SITUATION =
 const maxSegmentSeconds = 14;
 const silenceEndSeconds = 2;
 const speechDbThreshold = -52;
+const testDepositMinutes = 15;
+
+const EMPTY_PROFILE = {
+    userId: "",
+    displayName: "",
+    background: "",
+    experiences: "",
+    projects: "",
+    targetRole: "",
+    extraNotes: "",
+    balanceMinutes: 0,
+    totalDepositedMinutes: 0,
+    totalUsedMinutes: 0
+};
+
+function getOrCreateUserId() {
+    const storageKey = "interview-helper-user-id";
+    const existing = window.localStorage.getItem(storageKey);
+
+    if (existing) {
+        return existing;
+    }
+
+    const created = crypto.randomUUID();
+    window.localStorage.setItem(storageKey, created);
+    return created;
+}
+
+function buildProfileSituation(profile) {
+    const sections = [
+        profile.targetRole ? `Target role: ${profile.targetRole}` : "",
+        profile.background ? `Background: ${profile.background}` : "",
+        profile.experiences ? `Experiences: ${profile.experiences}` : "",
+        profile.projects ? `Projects: ${profile.projects}` : "",
+        profile.extraNotes ? `Extra notes: ${profile.extraNotes}` : ""
+    ].filter(Boolean);
+
+    if (!sections.length) {
+        return DEFAULT_SITUATION;
+    }
+
+    return `${DEFAULT_SITUATION}\n\nSaved candidate profile:\n${sections.join("\n")}`;
+}
+
+function formatMinutes(minutes) {
+    const safeMinutes = Math.max(0, Number(minutes || 0));
+    const wholeMinutes = Math.floor(safeMinutes);
+    const seconds = Math.round((safeMinutes - wholeMinutes) * 60);
+
+    if (wholeMinutes <= 0) {
+        return `${seconds}s`;
+    }
+
+    return `${wholeMinutes}m ${String(seconds).padStart(2, "0")}s`;
+}
 
 function blobToDataUrl(blob) {
     return new Promise((resolve, reject) => {
@@ -42,6 +97,12 @@ function makeLogItem(result) {
 }
 
 export default function Home() {
+    const [activeTab, setActiveTab] = useState("dashboard");
+    const [userId, setUserId] = useState("");
+    const [profile, setProfile] = useState(EMPTY_PROFILE);
+    const [isProfileLoading, setIsProfileLoading] = useState(true);
+    const [isProfileSaving, setIsProfileSaving] = useState(false);
+    const [profileStatus, setProfileStatus] = useState("");
     const [isListening, setIsListening] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
     const [status, setStatus] = useState("Ready");
@@ -66,6 +127,15 @@ export default function Home() {
     const questionBufferRef = useRef("");
     const situationRef = useRef(DEFAULT_SITUATION);
     const notesRef = useRef("");
+    const userIdRef = useRef("");
+
+    useEffect(() => {
+        const createdUserId = getOrCreateUserId();
+        userIdRef.current = createdUserId;
+        setUserId(createdUserId);
+        loadProfile(createdUserId);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     useEffect(() => {
         situationRef.current = situation;
@@ -79,8 +149,154 @@ export default function Home() {
         return () => stopListening();
     }, []);
 
+    useEffect(() => {
+        if (!isListening) {
+            return undefined;
+        }
+
+        const timer = setInterval(() => {
+            setProfile((current) => {
+                const nextBalance = Math.max(0, Number(current.balanceMinutes || 0) - 1 / 60);
+
+                if (nextBalance <= 0) {
+                    stopListening();
+                    setError("Your interview balance is empty. Add minutes from the dashboard.");
+                    setActiveTab("dashboard");
+                }
+
+                return {
+                    ...current,
+                    balanceMinutes: nextBalance
+                };
+            });
+        }, 1000);
+
+        return () => clearInterval(timer);
+    }, [isListening]);
+
+    async function loadProfile(profileUserId = userIdRef.current) {
+        if (!profileUserId) {
+            return;
+        }
+
+        setIsProfileLoading(true);
+
+        try {
+            const response = await fetch("/api/user-profile", {
+                headers: { "x-user-id": profileUserId }
+            });
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || "Could not load profile.");
+            }
+
+            applyProfile(data.profile);
+            setProfileStatus("Profile loaded");
+        } catch (profileError) {
+            setError(profileError.message || "Could not load profile.");
+        } finally {
+            setIsProfileLoading(false);
+        }
+    }
+
+    function applyProfile(nextProfile) {
+        const normalized = {
+            ...EMPTY_PROFILE,
+            ...nextProfile,
+            balanceMinutes: Number(nextProfile?.balanceMinutes || 0),
+            totalDepositedMinutes: Number(nextProfile?.totalDepositedMinutes || 0),
+            totalUsedMinutes: Number(nextProfile?.totalUsedMinutes || 0)
+        };
+
+        setProfile(normalized);
+        setSituation(buildProfileSituation(normalized));
+        setNotes(normalized.extraNotes || "");
+    }
+
+    function applyBalanceProfile(nextProfile) {
+        setProfile((current) => ({
+            ...current,
+            balanceMinutes: Number(nextProfile?.balanceMinutes || 0),
+            totalDepositedMinutes: Number(nextProfile?.totalDepositedMinutes || 0),
+            totalUsedMinutes: Number(nextProfile?.totalUsedMinutes || 0),
+            updatedAt: nextProfile?.updatedAt || current.updatedAt
+        }));
+    }
+
+    function updateProfileField(field, value) {
+        setProfile((current) => ({
+            ...current,
+            [field]: value
+        }));
+    }
+
+    async function saveProfile() {
+        setIsProfileSaving(true);
+        setProfileStatus("");
+        setError("");
+
+        try {
+            const response = await fetch("/api/user-profile", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "x-user-id": userIdRef.current
+                },
+                body: JSON.stringify(profile)
+            });
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || "Could not save profile.");
+            }
+
+            applyProfile(data.profile);
+            setProfileStatus("Saved");
+        } catch (profileError) {
+            setError(profileError.message || "Could not save profile.");
+        } finally {
+            setIsProfileSaving(false);
+        }
+    }
+
+    async function addTestBalance() {
+        setIsProfileSaving(true);
+        setProfileStatus("");
+        setError("");
+
+        try {
+            const response = await fetch("/api/user-balance", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "x-user-id": userIdRef.current
+                },
+                body: JSON.stringify({ minutes: testDepositMinutes })
+            });
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || "Could not add balance.");
+            }
+
+            applyBalanceProfile(data.profile);
+            setProfileStatus(`Added ${testDepositMinutes} minutes`);
+        } catch (profileError) {
+            setError(profileError.message || "Could not add balance.");
+        } finally {
+            setIsProfileSaving(false);
+        }
+    }
+
     async function startListening() {
         setError("");
+
+        if (Number(profile.balanceMinutes || 0) <= 0) {
+            setActiveTab("dashboard");
+            setError("Add interview minutes before starting a session.");
+            return;
+        }
 
         if (!navigator.mediaDevices?.getUserMedia) {
             setError("Microphone capture is not available in this browser.");
@@ -245,7 +461,10 @@ export default function Home() {
             }
 
             if (blob.size > 1200 && segmentMeta.hadSound) {
-                enqueueAudio(blob);
+                enqueueAudio({
+                    blob,
+                    durationSeconds: (performance.now() - segmentMeta.startedAt) / 1000
+                });
             }
         };
 
@@ -258,8 +477,8 @@ export default function Home() {
         }, maxSegmentSeconds * 1000);
     }
 
-    function enqueueAudio(blob) {
-        audioQueueRef.current.push(blob);
+    function enqueueAudio(item) {
+        audioQueueRef.current.push(item);
         processAudioQueue();
     }
 
@@ -273,12 +492,18 @@ export default function Home() {
         setStatus("Thinking");
 
         while (audioQueueRef.current.length) {
-            const blob = audioQueueRef.current.shift();
+            const item = audioQueueRef.current.shift();
 
             try {
-                await analyzeAudio(blob);
+                await analyzeAudio(item);
             } catch (analysisError) {
                 setError(analysisError.message || "Something went wrong.");
+
+                if (analysisError.status === 402) {
+                    stopListening();
+                    setActiveTab("dashboard");
+                    audioQueueRef.current = [];
+                }
             }
         }
 
@@ -287,7 +512,7 @@ export default function Home() {
         setStatus(activeRef.current ? "Listening" : "Stopped");
     }
 
-    async function analyzeAudio(blob) {
+    async function analyzeAudio({ blob, durationSeconds }) {
         try {
             const dataUrl = await blobToDataUrl(blob);
             const response = await fetch("/api/analyze-interview-audio", {
@@ -299,14 +524,27 @@ export default function Home() {
                     situation: situationRef.current,
                     notes: notesRef.current,
                     questionBuffer: questionBufferRef.current,
-                    history: historyRef.current.slice(-14)
+                    history: historyRef.current.slice(-14),
+                    userId: userIdRef.current,
+                    durationSeconds
                 })
             });
 
             const result = await response.json();
 
             if (!response.ok) {
-                throw new Error(result.error || "The analysis request failed.");
+                const requestError = new Error(result.error || "The analysis request failed.");
+                requestError.status = response.status;
+
+                if (result.profile) {
+                    applyBalanceProfile(result.profile);
+                }
+
+                throw requestError;
+            }
+
+            if (result.profile) {
+                applyBalanceProfile(result.profile);
             }
 
             if (!result.transcript?.trim() && !result.segments?.length) {
@@ -375,6 +613,133 @@ export default function Home() {
                     </div>
                 </section>
 
+                <section className="tabBar" aria-label="Main views">
+                    <button
+                        className={activeTab === "dashboard" ? "selected" : ""}
+                        onClick={() => setActiveTab("dashboard")}
+                    >
+                        Dashboard
+                    </button>
+                    <button
+                        className={activeTab === "interview" ? "selected" : ""}
+                        onClick={() => setActiveTab("interview")}
+                    >
+                        Interview
+                    </button>
+                </section>
+
+                {error ? <p className="error">{error}</p> : null}
+
+                {activeTab === "dashboard" ? (
+                    <>
+                        <section className="balancePanel">
+                            <div>
+                                <p className="eyebrow">Available balance</p>
+                                <strong>{formatMinutes(profile.balanceMinutes)}</strong>
+                            </div>
+                            <button onClick={addTestBalance} disabled={isProfileSaving}>
+                                Add {testDepositMinutes}m
+                            </button>
+                        </section>
+
+                        <section className="statsStrip">
+                            <span>{formatMinutes(profile.totalDepositedMinutes)} added</span>
+                            <span>{formatMinutes(profile.totalUsedMinutes)} used</span>
+                            <span>{isProfileLoading ? "Loading" : profileStatus || "Ready"}</span>
+                        </section>
+
+                        <section className="fieldGroup">
+                            <label htmlFor="displayName">Name</label>
+                            <input
+                                id="displayName"
+                                value={profile.displayName}
+                                onChange={(event) =>
+                                    updateProfileField("displayName", event.target.value)
+                                }
+                                placeholder="Your name"
+                            />
+                        </section>
+
+                        <section className="fieldGroup">
+                            <label htmlFor="targetRole">Target role</label>
+                            <input
+                                id="targetRole"
+                                value={profile.targetRole}
+                                onChange={(event) =>
+                                    updateProfileField("targetRole", event.target.value)
+                                }
+                                placeholder="Frontend engineer, backend engineer, PM..."
+                            />
+                        </section>
+
+                        <section className="fieldGroup">
+                            <label htmlFor="background">Background</label>
+                            <textarea
+                                id="background"
+                                value={profile.background}
+                                onChange={(event) =>
+                                    updateProfileField("background", event.target.value)
+                                }
+                                rows={4}
+                                placeholder="Education, current work, strengths, interests."
+                            />
+                        </section>
+
+                        <section className="fieldGroup">
+                            <label htmlFor="experiences">Experiences</label>
+                            <textarea
+                                id="experiences"
+                                value={profile.experiences}
+                                onChange={(event) =>
+                                    updateProfileField("experiences", event.target.value)
+                                }
+                                rows={5}
+                                placeholder="Past roles, internships, leadership, metrics, impact."
+                            />
+                        </section>
+
+                        <section className="fieldGroup">
+                            <label htmlFor="projects">Projects</label>
+                            <textarea
+                                id="projects"
+                                value={profile.projects}
+                                onChange={(event) =>
+                                    updateProfileField("projects", event.target.value)
+                                }
+                                rows={5}
+                                placeholder="Project names, tech stack, what you built, what changed."
+                            />
+                        </section>
+
+                        <section className="fieldGroup">
+                            <label htmlFor="extraNotes">Extra answer notes</label>
+                            <textarea
+                                id="extraNotes"
+                                value={profile.extraNotes}
+                                onChange={(event) =>
+                                    updateProfileField("extraNotes", event.target.value)
+                                }
+                                rows={4}
+                                placeholder="Stories to emphasize, companies, constraints, or topics to avoid."
+                            />
+                        </section>
+
+                        <button className="saveButton" onClick={saveProfile} disabled={isProfileSaving}>
+                            {isProfileSaving ? "Saving..." : "Save dashboard"}
+                        </button>
+
+                        <p className="helperText">User ID: {userId}</p>
+                    </>
+                ) : (
+                    <>
+                        <section className="balancePanel compactBalance">
+                            <div>
+                                <p className="eyebrow">Remaining</p>
+                                <strong>{formatMinutes(profile.balanceMinutes)}</strong>
+                            </div>
+                            <button onClick={() => setActiveTab("dashboard")}>Dashboard</button>
+                        </section>
+
                 <section className="controls">
                     <button
                         className={`listenButton ${isListening ? "stop" : ""}`}
@@ -397,8 +762,6 @@ export default function Home() {
                     <span>{audioQueueRef.current.length ? `${audioQueueRef.current.length} queued` : "Live"}</span>
                     <span>{`Max ${maxSegmentSeconds}s`}</span>
                 </section>
-
-                {error ? <p className="error">{error}</p> : null}
 
                 <section className="fieldGroup">
                     <label htmlFor="situation">Your situation</label>
@@ -475,6 +838,8 @@ export default function Home() {
                         ))}
                     </div>
                 </section>
+                    </>
+                )}
             </main>
 
             <style jsx>{`
@@ -564,6 +929,110 @@ export default function Home() {
                     align-items: stretch;
                     gap: 10px;
                     margin-bottom: 14px;
+                }
+
+                .tabBar {
+                    display: grid;
+                    grid-template-columns: 1fr 1fr;
+                    gap: 8px;
+                    margin-bottom: 14px;
+                    padding: 4px;
+                    border: 1px solid #d9d2c4;
+                    border-radius: 8px;
+                    background: #fffaf1;
+                }
+
+                .tabBar button,
+                .balancePanel button,
+                .saveButton {
+                    min-height: 42px;
+                    border: 0;
+                    border-radius: 7px;
+                    font: inherit;
+                    font-weight: 850;
+                }
+
+                .tabBar button {
+                    background: transparent;
+                    color: #52605a;
+                }
+
+                .tabBar .selected {
+                    background: #173d36;
+                    color: #ffffff;
+                }
+
+                .balancePanel {
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    gap: 14px;
+                    margin-bottom: 10px;
+                    padding: 14px;
+                    border: 1px solid #cddfd6;
+                    border-radius: 8px;
+                    background: #f1faf5;
+                }
+
+                .balancePanel strong {
+                    display: block;
+                    margin-top: 4px;
+                    color: #143d35;
+                    font-size: 2rem;
+                    line-height: 1;
+                }
+
+                .balancePanel button,
+                .saveButton {
+                    padding: 0 14px;
+                    background: #143d35;
+                    color: #ffffff;
+                }
+
+                .balancePanel button:disabled,
+                .saveButton:disabled {
+                    opacity: 0.62;
+                }
+
+                .compactBalance strong {
+                    font-size: 1.45rem;
+                }
+
+                .statsStrip {
+                    display: grid;
+                    grid-template-columns: repeat(3, 1fr);
+                    gap: 8px;
+                    margin-bottom: 14px;
+                }
+
+                .statsStrip span {
+                    min-height: 34px;
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    border: 1px solid #d9d2c4;
+                    border-radius: 8px;
+                    background: #fffaf1;
+                    color: #52605a;
+                    font-size: 0.74rem;
+                    font-weight: 850;
+                    text-align: center;
+                }
+
+                .saveButton {
+                    width: 100%;
+                    min-height: 54px;
+                    margin-bottom: 10px;
+                    font-size: 1rem;
+                    box-shadow: 0 10px 24px rgba(20, 61, 53, 0.18);
+                }
+
+                .helperText {
+                    overflow-wrap: anywhere;
+                    color: #68756e;
+                    font-size: 0.76rem;
+                    line-height: 1.35;
+                    text-align: center;
                 }
 
                 .listenButton {
@@ -672,9 +1141,9 @@ export default function Home() {
                     font-weight: 800;
                 }
 
+                input,
                 textarea {
                     width: 100%;
-                    resize: vertical;
                     border: 1px solid #cec5b7;
                     border-radius: 8px;
                     background: #ffffff;
@@ -684,6 +1153,15 @@ export default function Home() {
                     padding: 11px;
                 }
 
+                input {
+                    min-height: 45px;
+                }
+
+                textarea {
+                    resize: vertical;
+                }
+
+                input:focus,
                 textarea:focus {
                     border-color: #236b5d;
                     outline: 3px solid rgba(35, 107, 93, 0.16);

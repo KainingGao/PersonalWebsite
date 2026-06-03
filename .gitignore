@@ -20,6 +20,7 @@
 .DS_Store
 *.pem
 Thumbs.db
+.local-data/
 
 # debug
 npm-debug.log*
