@@ -14,6 +14,7 @@ const DEFAULT_SITUATION =
 const silenceEndSeconds = 2;
 const speechDbThreshold = -52;
 const testDepositMinutes = 15;
+const maxQuestionCaptureSeconds = 30;
 
 const EMPTY_PROFILE = {
     userId: "",
@@ -63,6 +64,54 @@ function blobToDataUrl(blob) {
         reader.onerror = reject;
         reader.readAsDataURL(blob);
     });
+}
+
+function mergeFloat32Chunks(chunks) {
+    const length = chunks.reduce((total, chunk) => total + chunk.length, 0);
+    const merged = new Float32Array(length);
+    let offset = 0;
+
+    for (const chunk of chunks) {
+        merged.set(chunk, offset);
+        offset += chunk.length;
+    }
+
+    return merged;
+}
+
+function writeString(view, offset, value) {
+    for (let index = 0; index < value.length; index += 1) {
+        view.setUint8(offset + index, value.charCodeAt(index));
+    }
+}
+
+function encodeWav(samples, sampleRate) {
+    const bytesPerSample = 2;
+    const buffer = new ArrayBuffer(44 + samples.length * bytesPerSample);
+    const view = new DataView(buffer);
+
+    writeString(view, 0, "RIFF");
+    view.setUint32(4, 36 + samples.length * bytesPerSample, true);
+    writeString(view, 8, "WAVE");
+    writeString(view, 12, "fmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * bytesPerSample, true);
+    view.setUint16(32, bytesPerSample, true);
+    view.setUint16(34, 8 * bytesPerSample, true);
+    writeString(view, 36, "data");
+    view.setUint32(40, samples.length * bytesPerSample, true);
+
+    let offset = 44;
+    for (const sample of samples) {
+        const clamped = Math.max(-1, Math.min(1, sample));
+        view.setInt16(offset, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true);
+        offset += bytesPerSample;
+    }
+
+    return new Blob([view], { type: "audio/wav" });
 }
 
 function makeLogItem(result) {
@@ -117,10 +166,12 @@ export default function Home() {
 
     const streamRef = useRef(null);
     const recorderRef = useRef(null);
-    const nextSegmentModeRef = useRef("context");
     const meterFrameRef = useRef(null);
     const audioContextRef = useRef(null);
     const analyserRef = useRef(null);
+    const audioProcessorRef = useRef(null);
+    const pcmChunksRef = useRef([]);
+    const pcmSampleRateRef = useRef(48000);
     const activeRef = useRef(false);
     const processingRef = useRef(false);
     const questionProcessingRef = useRef(false);
@@ -402,6 +453,8 @@ export default function Home() {
         audioContextRef.current?.close();
         audioContextRef.current = null;
         analyserRef.current = null;
+        audioProcessorRef.current = null;
+        pcmChunksRef.current = [];
         streamRef.current?.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
     }
@@ -423,6 +476,7 @@ export default function Home() {
         audioContextRef.current?.close();
         audioContextRef.current = null;
         analyserRef.current = null;
+        audioProcessorRef.current = null;
         streamRef.current?.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
     }
@@ -465,12 +519,35 @@ export default function Home() {
 
         const audioContext = new AudioContextClass();
         const analyser = audioContext.createAnalyser();
+        const processor = audioContext.createScriptProcessor(4096, 1, 1);
         const source = audioContext.createMediaStreamSource(stream);
 
+        pcmChunksRef.current = [];
         analyser.fftSize = 1024;
         source.connect(analyser);
+        source.connect(processor);
+        processor.connect(audioContext.destination);
+        processor.onaudioprocess = (event) => {
+            const input = event.inputBuffer.getChannelData(0);
+            const output = event.outputBuffer.getChannelData(0);
+            const now = performance.now();
+
+            output.fill(0);
+            pcmChunksRef.current.push({
+                data: new Float32Array(input),
+                endAt: now
+            });
+
+            const maxAgeMs = maxQuestionCaptureSeconds * 1000;
+            pcmChunksRef.current = pcmChunksRef.current.filter(
+                (chunk) => now - chunk.endAt <= maxAgeMs
+            );
+        };
+
         audioContextRef.current = audioContext;
         analyserRef.current = analyser;
+        audioProcessorRef.current = processor;
+        pcmSampleRateRef.current = audioContext.sampleRate;
     }
 
     function readCurrentDb() {
@@ -559,9 +636,6 @@ export default function Home() {
                 (performance.now() - segmentMeta.startedAt) / 1000
             );
             const blob = new Blob(chunks, { type: mimeType });
-            const analysisMode = nextSegmentModeRef.current;
-            nextSegmentModeRef.current = "context";
-
             if (activeRef.current) {
                 recordSegment();
             }
@@ -570,8 +644,7 @@ export default function Home() {
                 enqueueAudio({
                     blob,
                     durationSeconds,
-                    analysisMode,
-                    priority: analysisMode === "question"
+                    analysisMode: "context"
                 });
             }
         };
@@ -588,7 +661,17 @@ export default function Home() {
             return;
         }
 
-        nextSegmentModeRef.current = "question";
+        const recentChunks = pcmChunksRef.current.map((chunk) => chunk.data);
+        const samples = mergeFloat32Chunks(recentChunks);
+
+        if (samples.length < pcmSampleRateRef.current * 0.5) {
+            setError("I did not capture enough audio for that question.");
+            return;
+        }
+
+        const blob = encodeWav(samples, pcmSampleRateRef.current);
+        const durationSeconds = samples.length / pcmSampleRateRef.current;
+
         questionBufferRef.current = "";
         setQuestionBuffer("");
         setMarkedQuestionAt(
@@ -599,7 +682,12 @@ export default function Home() {
             })
         );
         setStatus("Question marked");
-        recorderRef.current.stop();
+
+        enqueueAudio({
+            blob,
+            durationSeconds,
+            analysisMode: "question"
+        });
     }
 
     function enqueueAudio(item) {
@@ -635,7 +723,13 @@ export default function Home() {
             try {
                 await analyzeAudio(item);
             } catch (analysisError) {
-                setError(analysisError.message || "Something went wrong.");
+                const isContextTranscriptionError =
+                    item.analysisMode === "context" &&
+                    String(analysisError.message || "").includes("Transcription failed");
+
+                if (!isContextTranscriptionError) {
+                    setError(analysisError.message || "Something went wrong.");
+                }
 
                 if (analysisError.status === 402) {
                     stopListening();
