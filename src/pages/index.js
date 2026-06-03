@@ -14,7 +14,6 @@ const DEFAULT_SITUATION =
 const silenceEndSeconds = 2;
 const speechDbThreshold = -52;
 const testDepositMinutes = 15;
-const recorderSliceMs = 1000;
 
 const EMPTY_PROFILE = {
     userId: "",
@@ -64,10 +63,6 @@ function blobToDataUrl(blob) {
         reader.onerror = reject;
         reader.readAsDataURL(blob);
     });
-}
-
-function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function makeLogItem(result) {
@@ -122,15 +117,15 @@ export default function Home() {
 
     const streamRef = useRef(null);
     const recorderRef = useRef(null);
-    const currentSegmentChunksRef = useRef([]);
-    const currentSegmentStartedAtRef = useRef(0);
-    const segmentMimeTypeRef = useRef("audio/webm");
+    const nextSegmentModeRef = useRef("context");
     const meterFrameRef = useRef(null);
     const audioContextRef = useRef(null);
     const analyserRef = useRef(null);
     const activeRef = useRef(false);
     const processingRef = useRef(false);
+    const questionProcessingRef = useRef(false);
     const audioQueueRef = useRef([]);
+    const questionQueueRef = useRef([]);
     const historyRef = useRef([]);
     const questionBufferRef = useRef("");
     const situationRef = useRef(DEFAULT_SITUATION);
@@ -151,6 +146,7 @@ export default function Home() {
 
     useEffect(() => {
         return () => stopListening();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     useEffect(() => {
@@ -176,6 +172,7 @@ export default function Home() {
         }, 1000);
 
         return () => clearInterval(timer);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isListening]);
 
     async function initializeAuth() {
@@ -390,6 +387,8 @@ export default function Home() {
         setIsListening(false);
         setIsSessionActive(false);
         setStatus("Stopped");
+        questionQueueRef.current = [];
+        updateQueueCount();
 
         if (meterFrameRef.current) {
             cancelAnimationFrame(meterFrameRef.current);
@@ -538,9 +537,7 @@ export default function Home() {
             ? "audio/webm;codecs=opus"
             : "audio/webm";
         const recorder = new MediaRecorder(streamRef.current, { mimeType });
-        currentSegmentChunksRef.current = [];
-        currentSegmentStartedAtRef.current = performance.now();
-        segmentMimeTypeRef.current = mimeType;
+        const chunks = [];
         const segmentMeta = {
             startedAt: performance.now(),
             lastSoundAt: performance.now(),
@@ -552,18 +549,18 @@ export default function Home() {
         recorderRef.current = recorder;
         recorder.ondataavailable = (event) => {
             if (event.data.size > 0) {
-                currentSegmentChunksRef.current.push(event.data);
+                chunks.push(event.data);
             }
         };
 
         recorder.onstop = () => {
-            const chunks = currentSegmentChunksRef.current;
             const durationSeconds = Math.max(
                 0,
-                (performance.now() - currentSegmentStartedAtRef.current) / 1000
+                (performance.now() - segmentMeta.startedAt) / 1000
             );
             const blob = new Blob(chunks, { type: mimeType });
-            currentSegmentChunksRef.current = [];
+            const analysisMode = nextSegmentModeRef.current;
+            nextSegmentModeRef.current = "context";
 
             if (activeRef.current) {
                 recordSegment();
@@ -573,12 +570,13 @@ export default function Home() {
                 enqueueAudio({
                     blob,
                     durationSeconds,
-                    analysisMode: "context"
+                    analysisMode,
+                    priority: analysisMode === "question"
                 });
             }
         };
 
-        recorder.start(recorderSliceMs);
+        recorder.start();
         monitorSilence(recorder, segmentMeta);
     }
 
@@ -590,23 +588,7 @@ export default function Home() {
             return;
         }
 
-        recorderRef.current.requestData();
-        await sleep(180);
-
-        const chunks = currentSegmentChunksRef.current.slice();
-        const durationSeconds = Math.max(
-            0,
-            (performance.now() - currentSegmentStartedAtRef.current) / 1000
-        );
-        const blob = new Blob(chunks, { type: segmentMimeTypeRef.current });
-
-        if (blob.size <= 1200) {
-            setError("I did not capture enough audio for that question.");
-            return;
-        }
-
-        currentSegmentChunksRef.current = [];
-        currentSegmentStartedAtRef.current = performance.now();
+        nextSegmentModeRef.current = "question";
         questionBufferRef.current = "";
         setQuestionBuffer("");
         setMarkedQuestionAt(
@@ -617,23 +599,61 @@ export default function Home() {
             })
         );
         setStatus("Question marked");
-
-        enqueueAudio({
-            blob,
-            durationSeconds,
-            analysisMode: "question",
-            priority: true
-        });
+        recorderRef.current.stop();
     }
 
     function enqueueAudio(item) {
-        if (item.priority) {
-            audioQueueRef.current.unshift(item);
-        } else {
-            audioQueueRef.current.push(item);
+        if (item.analysisMode === "question") {
+            questionQueueRef.current.push(item);
+            updateQueueCount();
+            processQuestionQueue();
+            return;
         }
-        setQueueCount(audioQueueRef.current.length);
+
+        audioQueueRef.current.push(item);
+        updateQueueCount();
         processAudioQueue();
+    }
+
+    function updateQueueCount() {
+        setQueueCount(audioQueueRef.current.length + questionQueueRef.current.length);
+    }
+
+    async function processQuestionQueue() {
+        if (questionProcessingRef.current) {
+            return;
+        }
+
+        questionProcessingRef.current = true;
+        setIsProcessing(true);
+        setStatus("Answering");
+
+        while (questionQueueRef.current.length) {
+            const item = questionQueueRef.current.shift();
+            updateQueueCount();
+
+            try {
+                await analyzeAudio(item);
+            } catch (analysisError) {
+                setError(analysisError.message || "Something went wrong.");
+
+                if (analysisError.status === 402) {
+                    stopListening();
+                    setActiveTab("dashboard");
+                    questionQueueRef.current = [];
+                    updateQueueCount();
+                }
+            }
+        }
+
+        questionProcessingRef.current = false;
+
+        if (!processingRef.current) {
+            setIsProcessing(false);
+            setStatus(activeRef.current ? "Listening" : "Stopped");
+        }
+
+        updateQueueCount();
     }
 
     async function processAudioQueue() {
@@ -647,7 +667,7 @@ export default function Home() {
 
         while (audioQueueRef.current.length) {
             const item = audioQueueRef.current.shift();
-            setQueueCount(audioQueueRef.current.length);
+            updateQueueCount();
 
             try {
                 await analyzeAudio(item);
@@ -658,18 +678,27 @@ export default function Home() {
                     stopListening();
                     setActiveTab("dashboard");
                     audioQueueRef.current = [];
-                    setQueueCount(0);
+                    updateQueueCount();
                 }
             }
         }
 
         processingRef.current = false;
-        setIsProcessing(false);
-        setStatus(activeRef.current ? "Listening" : "Stopped");
-        setQueueCount(audioQueueRef.current.length);
+
+        if (!questionProcessingRef.current) {
+            setIsProcessing(false);
+            setStatus(activeRef.current ? "Listening" : "Stopped");
+        }
+
+        updateQueueCount();
     }
 
     async function analyzeAudio({ blob, durationSeconds, analysisMode = "context" }) {
+        if (analysisMode === "question") {
+            await analyzeQuestionStream({ blob, durationSeconds });
+            return;
+        }
+
         try {
             const dataUrl = await blobToDataUrl(blob);
             const response = await fetch("/api/analyze-interview-audio", {
@@ -750,6 +779,120 @@ export default function Home() {
         }
     }
 
+    async function analyzeQuestionStream({ blob, durationSeconds }) {
+        const dataUrl = await blobToDataUrl(blob);
+        const startedAt = new Date().toLocaleTimeString([], {
+            hour: "numeric",
+            minute: "2-digit",
+            second: "2-digit"
+        });
+        let streamedAnswer = "";
+        let streamedQuestion = "Marked question";
+
+        setSuggestion({
+            question: streamedQuestion,
+            answer: "Transcribing question...",
+            bullets: [],
+            followUp: "",
+            createdAt: startedAt
+        });
+
+        const response = await fetch("/api/answer-question-stream", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({
+                audioBase64: dataUrl.split(",")[1],
+                mimeType: blob.type || "audio/webm",
+                situation: situationRef.current,
+                notes: notesRef.current,
+                history: historyRef.current.slice(-14),
+                durationSeconds
+            })
+        });
+
+        if (!response.ok || !response.body) {
+            const result = await response.json().catch(() => ({}));
+            const requestError = new Error(result.error || "The streamed answer request failed.");
+            requestError.status = response.status;
+
+            if (result.profile) {
+                applyBalanceProfile(result.profile);
+            }
+
+            throw requestError;
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+            const { done, value } = await reader.read();
+
+            if (done) {
+                break;
+            }
+
+            buffer += decoder.decode(value, { stream: true });
+            const events = buffer.split("\n\n");
+            buffer = events.pop() || "";
+
+            for (const block of events) {
+                const lines = block.split("\n");
+                const eventName = lines
+                    .find((line) => line.startsWith("event: "))
+                    ?.slice(7);
+                const data = JSON.parse(
+                    lines.find((line) => line.startsWith("data: "))?.slice(6) || "{}"
+                );
+
+                if (eventName === "profile" && data.profile) {
+                    applyBalanceProfile(data.profile);
+                }
+
+                if (eventName === "question") {
+                    streamedQuestion = data.transcript || streamedQuestion;
+                    setSuggestion((current) => ({
+                        ...(current || {}),
+                        question: streamedQuestion,
+                        answer: streamedAnswer || "Writing answer...",
+                        createdAt: startedAt
+                    }));
+                }
+
+                if (eventName === "delta") {
+                    streamedAnswer += data.text || "";
+                    setSuggestion((current) => ({
+                        ...(current || {}),
+                        question: streamedQuestion,
+                        answer: streamedAnswer,
+                        bullets: [],
+                        followUp: "",
+                        createdAt: startedAt
+                    }));
+                }
+
+                if (eventName === "done") {
+                    historyRef.current = [
+                        ...historyRef.current,
+                        {
+                            transcript: data.transcript || streamedQuestion,
+                            summary: `Answered marked question: ${streamedQuestion}`,
+                            questionState: "complete_question",
+                            question: streamedQuestion,
+                            shouldAnswer: true
+                        }
+                    ].slice(-24);
+                }
+
+                if (eventName === "error") {
+                    throw new Error(data.error || "Unable to stream answer.");
+                }
+            }
+        }
+    }
+
     return (
         <>
             <Head>
@@ -797,14 +940,6 @@ export default function Home() {
                         )}
                     </section>
 
-                    <button
-                        className="questionMarkButton"
-                        onClick={markQuestionEnded}
-                        disabled={!isListening}
-                    >
-                        Question ended
-                    </button>
-
                     <section className="sessionIndicator">
                         <span>{markedQuestionAt ? `Marked ${markedQuestionAt}` : "Tap after question"}</span>
                         <span>{isProcessing ? "Analyzing" : isListening ? "Recording" : "Paused"}</span>
@@ -812,16 +947,25 @@ export default function Home() {
                     </section>
 
                     <section className="sessionBottom">
-                        <div>
-                            <p className="eyebrow">Remaining</p>
-                            <strong>{formatMinutes(profile.balanceMinutes)}</strong>
+                        <button
+                            className="questionMarkButton"
+                            onClick={markQuestionEnded}
+                            disabled={!isListening}
+                        >
+                            Question ended
+                        </button>
+                        <div className="sessionControls">
+                            <div>
+                                <p className="eyebrow">Remaining</p>
+                                <strong>{formatMinutes(profile.balanceMinutes)}</strong>
+                            </div>
+                            <button onClick={isListening ? pauseListening : resumeListening}>
+                                {isListening ? "Pause" : "Resume"}
+                            </button>
+                            <button className="stopSession" onClick={stopListening}>
+                                Stop
+                            </button>
                         </div>
-                        <button onClick={isListening ? pauseListening : resumeListening}>
-                            {isListening ? "Pause" : "Resume"}
-                        </button>
-                        <button className="stopSession" onClick={stopListening}>
-                            Stop
-                        </button>
                     </section>
                 </main>
             ) : (
@@ -1190,10 +1334,16 @@ export default function Home() {
 
                 .sessionTop,
                 .sessionBottom {
-                    display: flex;
-                    align-items: center;
-                    justify-content: space-between;
-                    gap: 12px;
+                    display: grid;
+                    gap: 10px;
+                    position: sticky;
+                    bottom: max(18px, env(safe-area-inset-bottom));
+                    z-index: 3;
+                    padding: 10px;
+                    border: 1px solid #d9d2c4;
+                    border-radius: 8px;
+                    background: rgba(244, 240, 232, 0.96);
+                    backdrop-filter: blur(12px);
                 }
 
                 .sessionTop h1 {
@@ -1271,7 +1421,7 @@ export default function Home() {
 
                 .questionMarkButton {
                     width: 100%;
-                    min-height: 64px;
+                    min-height: 66px;
                     border: 0;
                     border-radius: 8px;
                     background: #236b5d;
@@ -1301,11 +1451,14 @@ export default function Home() {
                     text-align: center;
                 }
 
-                .sessionBottom {
-                    padding-top: 4px;
+                .sessionControls {
+                    display: grid;
+                    grid-template-columns: 1fr auto auto;
+                    align-items: center;
+                    gap: 10px;
                 }
 
-                .sessionBottom strong {
+                .sessionControls strong {
                     display: block;
                     margin-top: 3px;
                     color: #143d35;
@@ -1313,7 +1466,7 @@ export default function Home() {
                     line-height: 1;
                 }
 
-                .sessionBottom button {
+                .sessionControls button {
                     min-width: 94px;
                     min-height: 54px;
                     border: 0;
@@ -1324,7 +1477,7 @@ export default function Home() {
                     font-weight: 900;
                 }
 
-                .sessionBottom .stopSession {
+                .sessionControls .stopSession {
                     background: #b84036;
                 }
 
