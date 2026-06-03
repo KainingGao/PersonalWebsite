@@ -11,7 +11,6 @@ import {
 const DEFAULT_SITUATION =
     "I am practicing for software engineering interviews. Help me answer in a natural first-person voice using my background, projects, and experience. Keep answers concise unless the question needs depth.";
 
-const maxSegmentSeconds = 14;
 const silenceEndSeconds = 2;
 const speechDbThreshold = -52;
 const testDepositMinutes = 15;
@@ -103,6 +102,7 @@ export default function Home() {
     const [isProfileSaving, setIsProfileSaving] = useState(false);
     const [profileStatus, setProfileStatus] = useState("");
     const [isListening, setIsListening] = useState(false);
+    const [isSessionActive, setIsSessionActive] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
     const [status, setStatus] = useState("Ready");
     const [situation, setSituation] = useState(DEFAULT_SITUATION);
@@ -112,10 +112,10 @@ export default function Home() {
     const [error, setError] = useState("");
     const [questionBuffer, setQuestionBuffer] = useState("");
     const [levelDb, setLevelDb] = useState(null);
+    const [queueCount, setQueueCount] = useState(0);
 
     const streamRef = useRef(null);
     const recorderRef = useRef(null);
-    const timeoutRef = useRef(null);
     const meterFrameRef = useRef(null);
     const audioContextRef = useRef(null);
     const analyserRef = useRef(null);
@@ -367,6 +367,7 @@ export default function Home() {
             streamRef.current = stream;
             setupAudioMeter(stream);
             activeRef.current = true;
+            setIsSessionActive(true);
             setIsListening(true);
             setStatus("Listening");
             recordSegment();
@@ -378,12 +379,8 @@ export default function Home() {
     function stopListening() {
         activeRef.current = false;
         setIsListening(false);
+        setIsSessionActive(false);
         setStatus("Stopped");
-
-        if (timeoutRef.current) {
-            clearTimeout(timeoutRef.current);
-            timeoutRef.current = null;
-        }
 
         if (meterFrameRef.current) {
             cancelAnimationFrame(meterFrameRef.current);
@@ -399,6 +396,55 @@ export default function Home() {
         analyserRef.current = null;
         streamRef.current?.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
+    }
+
+    function pauseListening() {
+        activeRef.current = false;
+        setIsListening(false);
+        setStatus("Paused");
+
+        if (meterFrameRef.current) {
+            cancelAnimationFrame(meterFrameRef.current);
+            meterFrameRef.current = null;
+        }
+
+        if (recorderRef.current?.state === "recording") {
+            recorderRef.current.stop();
+        }
+
+        audioContextRef.current?.close();
+        audioContextRef.current = null;
+        analyserRef.current = null;
+        streamRef.current?.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+    }
+
+    async function resumeListening() {
+        if (!isSessionActive) {
+            await startListening();
+            return;
+        }
+
+        setError("");
+
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: false,
+                    noiseSuppression: true,
+                    autoGainControl: true
+                }
+            });
+
+            streamRef.current = stream;
+            setupAudioMeter(stream);
+            activeRef.current = true;
+            setIsListening(true);
+            setStatus("Listening");
+            recordSegment();
+        } catch (requestError) {
+            setError(requestError.message || "Could not access the microphone.");
+        }
     }
 
     function setupAudioMeter(stream) {
@@ -460,10 +506,9 @@ export default function Home() {
                 }
             }
 
-            const segmentAge = now - segmentMeta.startedAt;
             const silenceAge = now - segmentMeta.lastSoundAt;
 
-            if (segmentAge > 2600 && silenceAge >= silenceEndSeconds * 1000) {
+            if (segmentMeta.hadSound && silenceAge >= silenceEndSeconds * 1000) {
                 segmentMeta.stoppedForSilence = true;
                 recorder.stop();
                 return;
@@ -503,11 +548,6 @@ export default function Home() {
         recorder.onstop = () => {
             const blob = new Blob(chunks, { type: mimeType });
 
-            if (timeoutRef.current) {
-                clearTimeout(timeoutRef.current);
-                timeoutRef.current = null;
-            }
-
             if (activeRef.current) {
                 recordSegment();
             }
@@ -522,15 +562,11 @@ export default function Home() {
 
         recorder.start();
         monitorSilence(recorder, segmentMeta);
-        timeoutRef.current = setTimeout(() => {
-            if (recorder.state === "recording") {
-                recorder.stop();
-            }
-        }, maxSegmentSeconds * 1000);
     }
 
     function enqueueAudio(item) {
         audioQueueRef.current.push(item);
+        setQueueCount(audioQueueRef.current.length);
         processAudioQueue();
     }
 
@@ -545,6 +581,7 @@ export default function Home() {
 
         while (audioQueueRef.current.length) {
             const item = audioQueueRef.current.shift();
+            setQueueCount(audioQueueRef.current.length);
 
             try {
                 await analyzeAudio(item);
@@ -555,6 +592,7 @@ export default function Home() {
                     stopListening();
                     setActiveTab("dashboard");
                     audioQueueRef.current = [];
+                    setQueueCount(0);
                 }
             }
         }
@@ -562,6 +600,7 @@ export default function Home() {
         processingRef.current = false;
         setIsProcessing(false);
         setStatus(activeRef.current ? "Listening" : "Stopped");
+        setQueueCount(audioQueueRef.current.length);
     }
 
     async function analyzeAudio({ blob, durationSeconds }) {
@@ -653,6 +692,64 @@ export default function Home() {
                     content="width=device-width, initial-scale=1, viewport-fit=cover"
                 />
             </Head>
+            {isSessionActive ? (
+                <main className="sessionShell">
+                    <section className="sessionTop">
+                        <div>
+                            <p className="eyebrow">Interview live</p>
+                            <h1>{suggestion ? "Answer cue" : "Listening"}</h1>
+                        </div>
+                        <div className={`sessionDot ${isListening ? "active" : ""}`}>
+                            <span />
+                            {isProcessing ? "Thinking" : status}
+                        </div>
+                    </section>
+
+                    {error ? <p className="error">{error}</p> : null}
+
+                    <section className="answerFrame">
+                        {suggestion ? (
+                            <>
+                                <p className="currentQuestion">{suggestion.question}</p>
+                                <p className="currentAnswer">{suggestion.answer}</p>
+                                {suggestion.bullets?.length ? (
+                                    <ul>
+                                        {suggestion.bullets.map((bullet) => (
+                                            <li key={bullet}>{bullet}</li>
+                                        ))}
+                                    </ul>
+                                ) : null}
+                                {suggestion.followUp ? (
+                                    <p className="followUp">{suggestion.followUp}</p>
+                                ) : null}
+                            </>
+                        ) : (
+                            <div className="waitingFrame">
+                                <p>Waiting for the next interviewer question.</p>
+                            </div>
+                        )}
+                    </section>
+
+                    <section className="sessionIndicator">
+                        <span>{questionBuffer ? "Building question" : "Ready"}</span>
+                        <span>{isProcessing ? "Analyzing" : isListening ? "Recording" : "Paused"}</span>
+                        <span>{queueCount ? `${queueCount} queued` : `${levelDb ?? "--"} dB`}</span>
+                    </section>
+
+                    <section className="sessionBottom">
+                        <div>
+                            <p className="eyebrow">Remaining</p>
+                            <strong>{formatMinutes(profile.balanceMinutes)}</strong>
+                        </div>
+                        <button onClick={isListening ? pauseListening : resumeListening}>
+                            {isListening ? "Pause" : "Resume"}
+                        </button>
+                        <button className="stopSession" onClick={stopListening}>
+                            Stop
+                        </button>
+                    </section>
+                </main>
+            ) : (
             <main className="appShell">
                 <section className="topBar">
                     <div>
@@ -896,8 +993,8 @@ export default function Home() {
 
                 <section className="signalStrip">
                     <span>{levelDb === null ? "Mic waiting" : `${levelDb} dB`}</span>
-                    <span>{audioQueueRef.current.length ? `${audioQueueRef.current.length} queued` : "Live"}</span>
-                    <span>{`Max ${maxSegmentSeconds}s`}</span>
+                    <span>{queueCount ? `${queueCount} queued` : "Live"}</span>
+                    <span>Silence chunk</span>
                 </section>
 
                 <section className="fieldGroup">
@@ -978,6 +1075,7 @@ export default function Home() {
                     </>
                 )}
             </main>
+            )}
 
             <style jsx>{`
                 :global(html),
@@ -1001,6 +1099,140 @@ export default function Home() {
                     margin: 0 auto;
                     padding: max(18px, env(safe-area-inset-top)) 16px
                         max(28px, env(safe-area-inset-bottom));
+                }
+
+                .sessionShell {
+                    width: min(100%, 520px);
+                    min-height: 100svh;
+                    margin: 0 auto;
+                    display: grid;
+                    grid-template-rows: auto 1fr auto auto;
+                    gap: 12px;
+                    padding: max(18px, env(safe-area-inset-top)) 16px
+                        max(18px, env(safe-area-inset-bottom));
+                    background: #f4f0e8;
+                }
+
+                .sessionTop,
+                .sessionBottom {
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    gap: 12px;
+                }
+
+                .sessionTop h1 {
+                    font-size: 1.9rem;
+                }
+
+                .sessionDot {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 8px;
+                    min-height: 34px;
+                    padding: 8px 10px;
+                    border: 1px solid #d9d2c4;
+                    border-radius: 8px;
+                    background: #fffaf1;
+                    color: #57635e;
+                    font-size: 0.8rem;
+                    font-weight: 850;
+                }
+
+                .sessionDot span {
+                    width: 8px;
+                    height: 8px;
+                    border-radius: 999px;
+                    background: #8a948d;
+                }
+
+                .sessionDot.active span {
+                    background: #1d9a5b;
+                }
+
+                .answerFrame {
+                    min-height: 0;
+                    overflow-y: auto;
+                    display: grid;
+                    align-content: start;
+                    gap: 14px;
+                    padding: 18px;
+                    border: 1px solid #d9d2c4;
+                    border-radius: 8px;
+                    background: #fffaf1;
+                    box-shadow: 0 18px 44px rgba(38, 32, 21, 0.08);
+                }
+
+                .currentQuestion {
+                    color: #236b5d;
+                    font-size: 0.98rem;
+                    font-weight: 900;
+                    line-height: 1.35;
+                }
+
+                .currentAnswer {
+                    color: #17211e;
+                    font-size: 1.26rem;
+                    font-weight: 850;
+                    line-height: 1.42;
+                }
+
+                .waitingFrame {
+                    min-height: 46svh;
+                    display: grid;
+                    place-items: center;
+                    color: #68756e;
+                    text-align: center;
+                    font-size: 1rem;
+                    font-weight: 750;
+                    line-height: 1.45;
+                }
+
+                .sessionIndicator {
+                    display: grid;
+                    grid-template-columns: repeat(3, 1fr);
+                    gap: 8px;
+                }
+
+                .sessionIndicator span {
+                    min-height: 32px;
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    border: 1px solid #d9d2c4;
+                    border-radius: 8px;
+                    background: #fbf7ed;
+                    color: #52605a;
+                    font-size: 0.72rem;
+                    font-weight: 900;
+                    text-align: center;
+                }
+
+                .sessionBottom {
+                    padding-top: 4px;
+                }
+
+                .sessionBottom strong {
+                    display: block;
+                    margin-top: 3px;
+                    color: #143d35;
+                    font-size: 1.35rem;
+                    line-height: 1;
+                }
+
+                .sessionBottom button {
+                    min-width: 94px;
+                    min-height: 54px;
+                    border: 0;
+                    border-radius: 8px;
+                    background: #143d35;
+                    color: #ffffff;
+                    font: inherit;
+                    font-weight: 900;
+                }
+
+                .sessionBottom .stopSession {
+                    background: #b84036;
                 }
 
                 .topBar {
