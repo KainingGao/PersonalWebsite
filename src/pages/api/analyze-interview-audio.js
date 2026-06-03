@@ -56,8 +56,8 @@ async function transcribeAudio({ audioBase64, mimeType }) {
     const blob = new Blob([audioBuffer], { type: mimeType || "audio/webm" });
 
     form.append("file", blob, `interview-audio.${getExtension(mimeType)}`);
-    form.append("model", "gpt-4o-transcribe-diarize");
-    form.append("response_format", "diarized_json");
+    form.append("model", "gpt-4o-mini-transcribe");
+    form.append("response_format", "json");
     form.append("chunking_strategy", "auto");
 
     const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
@@ -83,22 +83,24 @@ async function decideAndAnswer({
     situation,
     notes,
     history,
-    questionBuffer
+    questionBuffer,
+    analysisMode
 }) {
+    const isManualQuestion = analysisMode === "question";
     const system = `You are a quiet interview practice copilot on the candidate's phone.
 
 Goal:
 - Summarize every transcript chunk so future follow-up questions have context.
-- Maintain an interviewer-question buffer across chunks.
-- Detect whether the newest chunk completes an interviewer question.
-- If the candidate is just answering, thinking aloud, greeting, or continuing an answer, do not trigger an answer.
-- If the interviewer question is incomplete or still being set up, mark it as partial_question.
-- If the interviewer asks a complete question, draft a concise first-person answer the candidate could say.
+- The user manually taps a button when an interviewer question has finished.
+- For manual question chunks, extract the just-finished interviewer question and draft a concise first-person answer.
+- For background context chunks, do not generate an answer. Only summarize useful context.
 
 Rules:
 - Use speaker labels when helpful, but do not assume the same label always belongs to the same person across chunks.
 - Treat Zara as the interviewer when that name appears.
-- Trigger only for a real interview question or clear prompt such as "tell me about..." or "walk me through...".
+- Manual question mode means the user is explicitly telling you the interviewer question just ended.
+- In manual question mode, answer the most recent interview question or prompt, including prompts such as "tell me about..." or "walk me through...".
+- In context mode, shouldAnswer must be false.
 - Do not answer the candidate's own rhetorical questions.
 - Keep the answer truthful to the supplied candidate situation and notes.
 - If there is not enough personal context, provide a flexible answer frame instead of inventing details.
@@ -115,6 +117,8 @@ Rules:
         {
             candidateSituation: situation,
             candidateNotes: notes,
+            analysisMode,
+            manualQuestionMode: isManualQuestion,
             existingQuestionBuffer: questionBuffer,
             recentHistory: history,
             latestTranscript: transcript,
@@ -224,7 +228,8 @@ export default async function handler(req, res) {
         notes = "",
         history = [],
         questionBuffer = "",
-        durationSeconds = 0
+        durationSeconds = 0,
+        analysisMode = "context"
     } = req.body || {};
 
     if (!audioBase64) {
@@ -277,21 +282,25 @@ export default async function handler(req, res) {
             situation,
             notes,
             history: Array.isArray(history) ? history : [],
-            questionBuffer
+            questionBuffer,
+            analysisMode
         });
+
+        const shouldAnswer = analysisMode === "question" && Boolean(decision.shouldAnswer);
 
         return res.status(200).json({
             transcript,
             segments,
             summary: decision.summary || "",
-            questionState: decision.questionState || "no_question",
-            shouldAnswer: Boolean(decision.shouldAnswer),
+            questionState:
+                analysisMode === "question" ? decision.questionState || "complete_question" : "no_question",
+            shouldAnswer,
             question: decision.question || "",
             questionFragment: decision.questionFragment || "",
             accumulatedQuestion: decision.accumulatedQuestion || "",
-            answer: decision.answer || "",
-            bullets: Array.isArray(decision.bullets) ? decision.bullets : [],
-            followUp: decision.followUp || "",
+            answer: shouldAnswer ? decision.answer || "" : "",
+            bullets: shouldAnswer && Array.isArray(decision.bullets) ? decision.bullets : [],
+            followUp: shouldAnswer ? decision.followUp || "" : "",
             reason: decision.reason || "",
             profile
         });

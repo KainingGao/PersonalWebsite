@@ -14,6 +14,7 @@ const DEFAULT_SITUATION =
 const silenceEndSeconds = 2;
 const speechDbThreshold = -52;
 const testDepositMinutes = 15;
+const recorderSliceMs = 1000;
 
 const EMPTY_PROFILE = {
     userId: "",
@@ -65,6 +66,10 @@ function blobToDataUrl(blob) {
     });
 }
 
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function makeLogItem(result) {
     const transcript = result.segments?.length
         ? result.segments
@@ -113,9 +118,13 @@ export default function Home() {
     const [questionBuffer, setQuestionBuffer] = useState("");
     const [levelDb, setLevelDb] = useState(null);
     const [queueCount, setQueueCount] = useState(0);
+    const [markedQuestionAt, setMarkedQuestionAt] = useState("");
 
     const streamRef = useRef(null);
     const recorderRef = useRef(null);
+    const currentSegmentChunksRef = useRef([]);
+    const currentSegmentStartedAtRef = useRef(0);
+    const segmentMimeTypeRef = useRef("audio/webm");
     const meterFrameRef = useRef(null);
     const audioContextRef = useRef(null);
     const analyserRef = useRef(null);
@@ -529,7 +538,9 @@ export default function Home() {
             ? "audio/webm;codecs=opus"
             : "audio/webm";
         const recorder = new MediaRecorder(streamRef.current, { mimeType });
-        const chunks = [];
+        currentSegmentChunksRef.current = [];
+        currentSegmentStartedAtRef.current = performance.now();
+        segmentMimeTypeRef.current = mimeType;
         const segmentMeta = {
             startedAt: performance.now(),
             lastSoundAt: performance.now(),
@@ -541,12 +552,18 @@ export default function Home() {
         recorderRef.current = recorder;
         recorder.ondataavailable = (event) => {
             if (event.data.size > 0) {
-                chunks.push(event.data);
+                currentSegmentChunksRef.current.push(event.data);
             }
         };
 
         recorder.onstop = () => {
+            const chunks = currentSegmentChunksRef.current;
+            const durationSeconds = Math.max(
+                0,
+                (performance.now() - currentSegmentStartedAtRef.current) / 1000
+            );
             const blob = new Blob(chunks, { type: mimeType });
+            currentSegmentChunksRef.current = [];
 
             if (activeRef.current) {
                 recordSegment();
@@ -555,17 +572,66 @@ export default function Home() {
             if (blob.size > 1200 && segmentMeta.hadSound) {
                 enqueueAudio({
                     blob,
-                    durationSeconds: (performance.now() - segmentMeta.startedAt) / 1000
+                    durationSeconds,
+                    analysisMode: "context"
                 });
             }
         };
 
-        recorder.start();
+        recorder.start(recorderSliceMs);
         monitorSilence(recorder, segmentMeta);
     }
 
+    async function markQuestionEnded() {
+        setError("");
+
+        if (!isListening || recorderRef.current?.state !== "recording") {
+            setError("Resume recording before marking a question.");
+            return;
+        }
+
+        recorderRef.current.requestData();
+        await sleep(180);
+
+        const chunks = currentSegmentChunksRef.current.slice();
+        const durationSeconds = Math.max(
+            0,
+            (performance.now() - currentSegmentStartedAtRef.current) / 1000
+        );
+        const blob = new Blob(chunks, { type: segmentMimeTypeRef.current });
+
+        if (blob.size <= 1200) {
+            setError("I did not capture enough audio for that question.");
+            return;
+        }
+
+        currentSegmentChunksRef.current = [];
+        currentSegmentStartedAtRef.current = performance.now();
+        questionBufferRef.current = "";
+        setQuestionBuffer("");
+        setMarkedQuestionAt(
+            new Date().toLocaleTimeString([], {
+                hour: "numeric",
+                minute: "2-digit",
+                second: "2-digit"
+            })
+        );
+        setStatus("Question marked");
+
+        enqueueAudio({
+            blob,
+            durationSeconds,
+            analysisMode: "question",
+            priority: true
+        });
+    }
+
     function enqueueAudio(item) {
-        audioQueueRef.current.push(item);
+        if (item.priority) {
+            audioQueueRef.current.unshift(item);
+        } else {
+            audioQueueRef.current.push(item);
+        }
         setQueueCount(audioQueueRef.current.length);
         processAudioQueue();
     }
@@ -603,7 +669,7 @@ export default function Home() {
         setQueueCount(audioQueueRef.current.length);
     }
 
-    async function analyzeAudio({ blob, durationSeconds }) {
+    async function analyzeAudio({ blob, durationSeconds, analysisMode = "context" }) {
         try {
             const dataUrl = await blobToDataUrl(blob);
             const response = await fetch("/api/analyze-interview-audio", {
@@ -617,7 +683,8 @@ export default function Home() {
                     notes: notesRef.current,
                     questionBuffer: questionBufferRef.current,
                     history: historyRef.current.slice(-14),
-                    durationSeconds
+                    durationSeconds,
+                    analysisMode
                 })
             });
 
@@ -730,8 +797,16 @@ export default function Home() {
                         )}
                     </section>
 
+                    <button
+                        className="questionMarkButton"
+                        onClick={markQuestionEnded}
+                        disabled={!isListening}
+                    >
+                        Question ended
+                    </button>
+
                     <section className="sessionIndicator">
-                        <span>{questionBuffer ? "Building question" : "Ready"}</span>
+                        <span>{markedQuestionAt ? `Marked ${markedQuestionAt}` : "Tap after question"}</span>
                         <span>{isProcessing ? "Analyzing" : isListening ? "Recording" : "Paused"}</span>
                         <span>{queueCount ? `${queueCount} queued` : `${levelDb ?? "--"} dB`}</span>
                     </section>
@@ -1192,6 +1267,24 @@ export default function Home() {
                     display: grid;
                     grid-template-columns: repeat(3, 1fr);
                     gap: 8px;
+                }
+
+                .questionMarkButton {
+                    width: 100%;
+                    min-height: 64px;
+                    border: 0;
+                    border-radius: 8px;
+                    background: #236b5d;
+                    color: #ffffff;
+                    font: inherit;
+                    font-size: 1.08rem;
+                    font-weight: 950;
+                    box-shadow: 0 14px 30px rgba(35, 107, 93, 0.22);
+                }
+
+                .questionMarkButton:disabled {
+                    opacity: 0.55;
+                    box-shadow: none;
                 }
 
                 .sessionIndicator span {
