@@ -1,5 +1,12 @@
 import Head from "next/head";
 import { useEffect, useRef, useState } from "react";
+import {
+    getUser,
+    handleAuthCallback,
+    login,
+    logout,
+    signup
+} from "@netlify/identity";
 
 const DEFAULT_SITUATION =
     "I am practicing for software engineering interviews. Help me answer in a natural first-person voice using my background, projects, and experience. Keep answers concise unless the question needs depth.";
@@ -21,19 +28,6 @@ const EMPTY_PROFILE = {
     totalDepositedMinutes: 0,
     totalUsedMinutes: 0
 };
-
-function getOrCreateUserId() {
-    const storageKey = "interview-helper-user-id";
-    const existing = window.localStorage.getItem(storageKey);
-
-    if (existing) {
-        return existing;
-    }
-
-    const created = crypto.randomUUID();
-    window.localStorage.setItem(storageKey, created);
-    return created;
-}
 
 function buildProfileSituation(profile) {
     const sections = [
@@ -98,7 +92,12 @@ function makeLogItem(result) {
 
 export default function Home() {
     const [activeTab, setActiveTab] = useState("dashboard");
-    const [userId, setUserId] = useState("");
+    const [user, setUser] = useState(null);
+    const [authMode, setAuthMode] = useState("login");
+    const [authEmail, setAuthEmail] = useState("");
+    const [authPassword, setAuthPassword] = useState("");
+    const [authName, setAuthName] = useState("");
+    const [isAuthBusy, setIsAuthBusy] = useState(false);
     const [profile, setProfile] = useState(EMPTY_PROFILE);
     const [isProfileLoading, setIsProfileLoading] = useState(true);
     const [isProfileSaving, setIsProfileSaving] = useState(false);
@@ -127,13 +126,9 @@ export default function Home() {
     const questionBufferRef = useRef("");
     const situationRef = useRef(DEFAULT_SITUATION);
     const notesRef = useRef("");
-    const userIdRef = useRef("");
 
     useEffect(() => {
-        const createdUserId = getOrCreateUserId();
-        userIdRef.current = createdUserId;
-        setUserId(createdUserId);
-        loadProfile(createdUserId);
+        initializeAuth();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
@@ -174,16 +169,32 @@ export default function Home() {
         return () => clearInterval(timer);
     }, [isListening]);
 
-    async function loadProfile(profileUserId = userIdRef.current) {
-        if (!profileUserId) {
-            return;
-        }
+    async function initializeAuth() {
+        setIsProfileLoading(true);
 
+        try {
+            await handleAuthCallback();
+            const currentUser = await getUser();
+            setUser(currentUser);
+
+            if (currentUser) {
+                await loadProfile();
+            } else {
+                setProfileStatus("Please log in");
+            }
+        } catch (authError) {
+            setError(authError.message || "Could not initialize login.");
+        } finally {
+            setIsProfileLoading(false);
+        }
+    }
+
+    async function loadProfile() {
         setIsProfileLoading(true);
 
         try {
             const response = await fetch("/api/user-profile", {
-                headers: { "x-user-id": profileUserId }
+                credentials: "include"
             });
             const data = await response.json();
 
@@ -192,12 +203,47 @@ export default function Home() {
             }
 
             applyProfile(data.profile);
+            setUser(data.user || (await getUser()));
             setProfileStatus("Profile loaded");
         } catch (profileError) {
             setError(profileError.message || "Could not load profile.");
         } finally {
             setIsProfileLoading(false);
         }
+    }
+
+    async function submitAuth(event) {
+        event.preventDefault();
+        setIsAuthBusy(true);
+        setError("");
+        setProfileStatus("");
+
+        try {
+            const nextUser =
+                authMode === "signup"
+                    ? await signup(authEmail, authPassword, { full_name: authName })
+                    : await login(authEmail, authPassword);
+
+            setUser(nextUser);
+            await loadProfile();
+            setProfileStatus(authMode === "signup" ? "Account created" : "Logged in");
+            setAuthPassword("");
+        } catch (authError) {
+            setError(authError.message || "Authentication failed.");
+        } finally {
+            setIsAuthBusy(false);
+        }
+    }
+
+    async function signOut() {
+        stopListening();
+        await logout();
+        setUser(null);
+        setProfile(EMPTY_PROFILE);
+        setSuggestion(null);
+        setLogs([]);
+        historyRef.current = [];
+        setProfileStatus("Logged out");
     }
 
     function applyProfile(nextProfile) {
@@ -240,9 +286,9 @@ export default function Home() {
             const response = await fetch("/api/user-profile", {
                 method: "POST",
                 headers: {
-                    "Content-Type": "application/json",
-                    "x-user-id": userIdRef.current
+                    "Content-Type": "application/json"
                 },
+                credentials: "include",
                 body: JSON.stringify(profile)
             });
             const data = await response.json();
@@ -269,9 +315,9 @@ export default function Home() {
             const response = await fetch("/api/user-balance", {
                 method: "POST",
                 headers: {
-                    "Content-Type": "application/json",
-                    "x-user-id": userIdRef.current
+                    "Content-Type": "application/json"
                 },
+                credentials: "include",
                 body: JSON.stringify({ minutes: testDepositMinutes })
             });
             const data = await response.json();
@@ -291,6 +337,12 @@ export default function Home() {
 
     async function startListening() {
         setError("");
+
+        if (!user) {
+            setActiveTab("dashboard");
+            setError("Log in before starting an interview session.");
+            return;
+        }
 
         if (Number(profile.balanceMinutes || 0) <= 0) {
             setActiveTab("dashboard");
@@ -518,6 +570,7 @@ export default function Home() {
             const response = await fetch("/api/analyze-interview-audio", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
+                credentials: "include",
                 body: JSON.stringify({
                     audioBase64: dataUrl.split(",")[1],
                     mimeType: blob.type || "audio/webm",
@@ -525,7 +578,6 @@ export default function Home() {
                     notes: notesRef.current,
                     questionBuffer: questionBufferRef.current,
                     history: historyRef.current.slice(-14),
-                    userId: userIdRef.current,
                     durationSeconds
                 })
             });
@@ -632,12 +684,85 @@ export default function Home() {
 
                 {activeTab === "dashboard" ? (
                     <>
+                        {!user ? (
+                            <section className="authPanel">
+                                <div className="sectionHeader">
+                                    <h2>{authMode === "signup" ? "Create account" : "Log in"}</h2>
+                                    <button
+                                        className="linkButton"
+                                        onClick={() =>
+                                            setAuthMode(authMode === "signup" ? "login" : "signup")
+                                        }
+                                    >
+                                        {authMode === "signup" ? "Use login" : "Sign up"}
+                                    </button>
+                                </div>
+                                <form onSubmit={submitAuth}>
+                                    {authMode === "signup" ? (
+                                        <label htmlFor="authName">
+                                            Name
+                                            <input
+                                                id="authName"
+                                                value={authName}
+                                                onChange={(event) => setAuthName(event.target.value)}
+                                                autoComplete="name"
+                                            />
+                                        </label>
+                                    ) : null}
+                                    <label htmlFor="authEmail">
+                                        Email
+                                        <input
+                                            id="authEmail"
+                                            type="email"
+                                            value={authEmail}
+                                            onChange={(event) => setAuthEmail(event.target.value)}
+                                            autoComplete="email"
+                                            required
+                                        />
+                                    </label>
+                                    <label htmlFor="authPassword">
+                                        Password
+                                        <input
+                                            id="authPassword"
+                                            type="password"
+                                            value={authPassword}
+                                            onChange={(event) => setAuthPassword(event.target.value)}
+                                            autoComplete={
+                                                authMode === "signup"
+                                                    ? "new-password"
+                                                    : "current-password"
+                                            }
+                                            required
+                                        />
+                                    </label>
+                                    <button className="saveButton" disabled={isAuthBusy}>
+                                        {isAuthBusy
+                                            ? "Working..."
+                                            : authMode === "signup"
+                                              ? "Create account"
+                                              : "Log in"}
+                                    </button>
+                                </form>
+                                <p className="helperText">
+                                    Each account gets its own saved profile and balance.
+                                </p>
+                            </section>
+                        ) : (
+                            <section className="accountPanel">
+                                <div>
+                                    <p className="eyebrow">Signed in</p>
+                                    <strong>{user.email}</strong>
+                                </div>
+                                <button onClick={signOut}>Log out</button>
+                            </section>
+                        )}
+
                         <section className="balancePanel">
                             <div>
                                 <p className="eyebrow">Available balance</p>
                                 <strong>{formatMinutes(profile.balanceMinutes)}</strong>
                             </div>
-                            <button onClick={addTestBalance} disabled={isProfileSaving}>
+                            <button onClick={addTestBalance} disabled={isProfileSaving || !user}>
                                 Add {testDepositMinutes}m
                             </button>
                         </section>
@@ -657,6 +782,7 @@ export default function Home() {
                                     updateProfileField("displayName", event.target.value)
                                 }
                                 placeholder="Your name"
+                                disabled={!user}
                             />
                         </section>
 
@@ -669,6 +795,7 @@ export default function Home() {
                                     updateProfileField("targetRole", event.target.value)
                                 }
                                 placeholder="Frontend engineer, backend engineer, PM..."
+                                disabled={!user}
                             />
                         </section>
 
@@ -682,6 +809,7 @@ export default function Home() {
                                 }
                                 rows={4}
                                 placeholder="Education, current work, strengths, interests."
+                                disabled={!user}
                             />
                         </section>
 
@@ -695,6 +823,7 @@ export default function Home() {
                                 }
                                 rows={5}
                                 placeholder="Past roles, internships, leadership, metrics, impact."
+                                disabled={!user}
                             />
                         </section>
 
@@ -708,6 +837,7 @@ export default function Home() {
                                 }
                                 rows={5}
                                 placeholder="Project names, tech stack, what you built, what changed."
+                                disabled={!user}
                             />
                         </section>
 
@@ -721,14 +851,21 @@ export default function Home() {
                                 }
                                 rows={4}
                                 placeholder="Stories to emphasize, companies, constraints, or topics to avoid."
+                                disabled={!user}
                             />
                         </section>
 
-                        <button className="saveButton" onClick={saveProfile} disabled={isProfileSaving}>
+                        <button
+                            className="saveButton"
+                            onClick={saveProfile}
+                            disabled={isProfileSaving || !user}
+                        >
                             {isProfileSaving ? "Saving..." : "Save dashboard"}
                         </button>
 
-                        <p className="helperText">User ID: {userId}</p>
+                        <p className="helperText">
+                            {user ? `Account ID: ${profile.userId}` : "Log in to edit dashboard data."}
+                        </p>
                     </>
                 ) : (
                     <>
@@ -974,6 +1111,64 @@ export default function Home() {
                     background: #f1faf5;
                 }
 
+                .authPanel,
+                .accountPanel {
+                    margin-bottom: 14px;
+                    padding: 14px;
+                    border: 1px solid #d9d2c4;
+                    border-radius: 8px;
+                    background: #fffaf1;
+                }
+
+                .authPanel form {
+                    display: grid;
+                    gap: 12px;
+                }
+
+                .authPanel label {
+                    margin-bottom: 0;
+                }
+
+                .authPanel input {
+                    margin-top: 8px;
+                }
+
+                .accountPanel {
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    gap: 12px;
+                }
+
+                .accountPanel strong {
+                    display: block;
+                    overflow-wrap: anywhere;
+                    margin-top: 3px;
+                    color: #143d35;
+                    font-size: 0.95rem;
+                }
+
+                .accountPanel button,
+                .linkButton {
+                    border: 0;
+                    border-radius: 7px;
+                    background: #ece5d9;
+                    color: #33413c;
+                    font: inherit;
+                    font-weight: 850;
+                }
+
+                .accountPanel button {
+                    min-height: 38px;
+                    padding: 0 12px;
+                }
+
+                .linkButton {
+                    min-height: 32px;
+                    padding: 0 10px;
+                    font-size: 0.8rem;
+                }
+
                 .balancePanel strong {
                     display: block;
                     margin-top: 4px;
@@ -1165,6 +1360,12 @@ export default function Home() {
                 textarea:focus {
                     border-color: #236b5d;
                     outline: 3px solid rgba(35, 107, 93, 0.16);
+                }
+
+                input:disabled,
+                textarea:disabled {
+                    background: #f4f0e8;
+                    color: #7b8580;
                 }
 
                 .sectionHeader {

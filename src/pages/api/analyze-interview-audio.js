@@ -1,3 +1,4 @@
+import { authErrorResponse, requireAuthUser } from "../../lib/authUser";
 import { getUserProfile, spendBalanceMinutes } from "../../lib/userStore";
 
 export const config = {
@@ -223,7 +224,6 @@ export default async function handler(req, res) {
         notes = "",
         history = [],
         questionBuffer = "",
-        userId = "",
         durationSeconds = 0
     } = req.body || {};
 
@@ -232,17 +232,14 @@ export default async function handler(req, res) {
     }
 
     try {
-        let profile = null;
+        const user = await requireAuthUser();
+        let profile = await getUserProfile(user.id, user);
 
-        if (userId) {
-            profile = await getUserProfile(userId);
-
-            if (profile.balanceMinutes <= 0) {
-                return res.status(402).json({
-                    error: "Your interview balance is empty. Add minutes from the dashboard.",
-                    profile
-                });
-            }
+        if (profile.balanceMinutes <= 0) {
+            return res.status(402).json({
+                error: "Your interview balance is empty. Add minutes from the dashboard.",
+                profile
+            });
         }
 
         const transcription = await transcribeAudio({ audioBase64, mimeType });
@@ -269,8 +266,8 @@ export default async function handler(req, res) {
             });
         }
 
-        if (userId && durationSeconds > 0) {
-            const spend = await spendBalanceMinutes(userId, Number(durationSeconds) / 60);
+        if (durationSeconds > 0) {
+            const spend = await spendBalanceMinutes(user.id, Number(durationSeconds) / 60, user);
             profile = spend.profile;
         }
 
@@ -299,6 +296,10 @@ export default async function handler(req, res) {
             profile
         });
     } catch (error) {
+        if (error.statusCode) {
+            return authErrorResponse(error, res);
+        }
+
         return res.status(500).json({
             error: error.message || "Unable to analyze audio."
         });

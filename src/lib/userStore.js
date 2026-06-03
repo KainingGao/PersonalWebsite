@@ -7,6 +7,7 @@ const localDataPath = path.join(process.cwd(), ".local-data", "interview-users.j
 
 export const defaultProfile = {
     userId: "",
+    email: "",
     displayName: "",
     background: "",
     experiences: "",
@@ -27,13 +28,15 @@ function safeUserId(userId) {
         .slice(0, 96);
 }
 
-function makeProfile(userId, existing = {}) {
+function makeProfile(userId, existing = {}, authUser = {}) {
     const now = new Date().toISOString();
 
     return {
         ...defaultProfile,
         ...existing,
         userId,
+        email: authUser.email || existing.email || "",
+        displayName: existing.displayName || authUser.name || "",
         balanceMinutes: Number(existing.balanceMinutes || 0),
         totalDepositedMinutes: Number(existing.totalDepositedMinutes || 0),
         totalUsedMinutes: Number(existing.totalUsedMinutes || 0),
@@ -72,7 +75,7 @@ async function writeBlobProfile(userId, profile) {
     await store.setJSON(`profiles/${userId}`, profile);
 }
 
-export async function getUserProfile(userIdInput) {
+export async function getUserProfile(userIdInput, authUser = {}) {
     const userId = safeUserId(userIdInput);
 
     if (!userId) {
@@ -81,7 +84,7 @@ export async function getUserProfile(userIdInput) {
 
     if (shouldUseLocalStore()) {
         const data = await readLocalData();
-        const profile = makeProfile(userId, data[userId]);
+        const profile = makeProfile(userId, data[userId], authUser);
 
         if (!data[userId]) {
             data[userId] = profile;
@@ -92,7 +95,7 @@ export async function getUserProfile(userIdInput) {
     }
 
     const storedProfile = await readBlobProfile(userId);
-    const profile = makeProfile(userId, storedProfile || {});
+    const profile = makeProfile(userId, storedProfile || {}, authUser);
 
     if (!storedProfile) {
         await writeBlobProfile(userId, profile);
@@ -101,16 +104,16 @@ export async function getUserProfile(userIdInput) {
     return profile;
 }
 
-export async function saveUserProfile(userIdInput, updates) {
+export async function saveUserProfile(userIdInput, updates, authUser = {}) {
     const userId = safeUserId(userIdInput);
-    const current = await getUserProfile(userId);
+    const current = await getUserProfile(userId, authUser);
     const profile = makeProfile(userId, {
         ...current,
         ...updates,
         balanceMinutes: current.balanceMinutes,
         totalDepositedMinutes: current.totalDepositedMinutes,
         totalUsedMinutes: current.totalUsedMinutes
-    });
+    }, authUser);
 
     if (shouldUseLocalStore()) {
         const data = await readLocalData();
@@ -123,15 +126,15 @@ export async function saveUserProfile(userIdInput, updates) {
     return profile;
 }
 
-export async function addBalanceMinutes(userIdInput, minutesInput) {
+export async function addBalanceMinutes(userIdInput, minutesInput, authUser = {}) {
     const userId = safeUserId(userIdInput);
     const minutes = Math.max(0, Number(minutesInput || 0));
-    const current = await getUserProfile(userId);
+    const current = await getUserProfile(userId, authUser);
     const profile = makeProfile(userId, {
         ...current,
         balanceMinutes: current.balanceMinutes + minutes,
         totalDepositedMinutes: current.totalDepositedMinutes + minutes
-    });
+    }, authUser);
 
     if (shouldUseLocalStore()) {
         const data = await readLocalData();
@@ -144,10 +147,10 @@ export async function addBalanceMinutes(userIdInput, minutesInput) {
     return profile;
 }
 
-export async function spendBalanceMinutes(userIdInput, minutesInput) {
+export async function spendBalanceMinutes(userIdInput, minutesInput, authUser = {}) {
     const userId = safeUserId(userIdInput);
     const minutes = Math.max(0, Number(minutesInput || 0));
-    const current = await getUserProfile(userId);
+    const current = await getUserProfile(userId, authUser);
 
     if (current.balanceMinutes <= 0) {
         return {
@@ -162,7 +165,7 @@ export async function spendBalanceMinutes(userIdInput, minutesInput) {
         ...current,
         balanceMinutes: Math.max(0, current.balanceMinutes - chargedMinutes),
         totalUsedMinutes: current.totalUsedMinutes + chargedMinutes
-    });
+    }, authUser);
 
     if (shouldUseLocalStore()) {
         const data = await readLocalData();
