@@ -193,7 +193,7 @@ Rules:
                     }
                 }
             },
-            reasoning: { effort: "none" }
+            reasoning: { effort: "low" }
         })
     });
 

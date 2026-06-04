@@ -102,7 +102,7 @@ Keep it concise, specific, and natural to say aloud. Use the candidate profile a
                     ]
                 }
             ],
-            reasoning: { effort: "none" }
+            reasoning: { effort: "low" }
         })
     });
 
