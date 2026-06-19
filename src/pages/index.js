@@ -1,5 +1,6 @@
 import Head from "next/head";
 import { useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
 import {
     getUser,
     handleAuthCallback,
@@ -136,6 +137,14 @@ function makeLogItem(result) {
             second: "2-digit"
         })
     };
+}
+
+function MarkdownAnswer({ children, className = "" }) {
+    return (
+        <div className={`markdownAnswer ${className}`.trim()}>
+            <ReactMarkdown skipHtml>{children || ""}</ReactMarkdown>
+        </div>
+    );
 }
 
 export default function Home() {
@@ -1015,7 +1024,9 @@ export default function Home() {
                         {suggestion ? (
                             <>
                                 <p className="currentQuestion">{suggestion.question}</p>
-                                <p className="currentAnswer">{suggestion.answer}</p>
+                                <MarkdownAnswer className="currentAnswer">
+                                    {suggestion.answer}
+                                </MarkdownAnswer>
                                 {suggestion.bullets?.length ? (
                                     <ul>
                                         {suggestion.bullets.map((bullet) => (
@@ -1345,7 +1356,9 @@ export default function Home() {
                     {suggestion ? (
                         <div className="suggestion">
                             <p className="question">{suggestion.question}</p>
-                            <p className="answer">{suggestion.answer}</p>
+                            <MarkdownAnswer className="answer">
+                                {suggestion.answer}
+                            </MarkdownAnswer>
                             {suggestion.bullets?.length ? (
                                 <ul>
                                     {suggestion.bullets.map((bullet) => (
@@ -1494,6 +1507,51 @@ export default function Home() {
                     font-size: 1.26rem;
                     font-weight: 850;
                     line-height: 1.42;
+                }
+
+                .markdownAnswer {
+                    min-width: 0;
+                }
+
+                .markdownAnswer :global(p) {
+                    margin: 0 0 0.8em;
+                    white-space: pre-wrap;
+                }
+
+                .markdownAnswer :global(p:last-child),
+                .markdownAnswer :global(ul:last-child),
+                .markdownAnswer :global(ol:last-child),
+                .markdownAnswer :global(pre:last-child) {
+                    margin-bottom: 0;
+                }
+
+                .markdownAnswer :global(ul),
+                .markdownAnswer :global(ol) {
+                    margin: 0 0 0.8em;
+                    padding-left: 1.4em;
+                }
+
+                .markdownAnswer :global(li + li) {
+                    margin-top: 0.35em;
+                }
+
+                .markdownAnswer :global(strong) {
+                    font-weight: 950;
+                }
+
+                .markdownAnswer :global(code) {
+                    overflow-wrap: anywhere;
+                    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+                    font-size: 0.88em;
+                }
+
+                .markdownAnswer :global(pre) {
+                    overflow-x: auto;
+                    margin: 0 0 0.8em;
+                    padding: 12px;
+                    border-radius: 6px;
+                    background: #eee8dc;
+                    white-space: pre-wrap;
                 }
 
                 .waitingFrame {
