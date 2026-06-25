@@ -996,6 +996,34 @@ export default function Home() {
         }
     }
 
+    const profileFieldsComplete = [
+        profile.displayName,
+        profile.targetRole,
+        profile.background,
+        profile.experiences,
+        profile.projects
+    ].filter((value) => value?.trim()).length;
+    const profileScore = Math.round((profileFieldsComplete / 5) * 100);
+    const hasBalance = Number(profile.balanceMinutes || 0) > 0;
+    const canStartInterview = Boolean(user && hasBalance);
+    const readinessItems = [
+        {
+            label: "Account",
+            value: user ? "Connected" : "Sign in required",
+            complete: Boolean(user)
+        },
+        {
+            label: "Profile",
+            value: `${profileScore}% ready`,
+            complete: profileScore >= 60
+        },
+        {
+            label: "Minutes",
+            value: formatMinutes(profile.balanceMinutes),
+            complete: hasBalance
+        }
+    ];
+
     return (
         <>
             <Head>
@@ -1009,10 +1037,10 @@ export default function Home() {
                 <main className="sessionShell">
                     <section className="sessionTop">
                         <div>
-                            <p className="eyebrow">Interview live</p>
-                            <h1>{suggestion ? "Answer cue" : "Listening"}</h1>
+                            <p className="eyebrow">Live session</p>
+                            <h1>{suggestion ? "Answer ready" : "Listening"}</h1>
                         </div>
-                        <div className={`sessionDot ${isListening ? "active" : ""}`}>
+                        <div className={`statusPill ${isListening ? "active" : ""}`}>
                             <span />
                             {isProcessing ? "Thinking" : status}
                         </div>
@@ -1022,7 +1050,8 @@ export default function Home() {
 
                     <section className="answerFrame">
                         {suggestion ? (
-                            <>
+                            <article className="answerContent">
+                                <p className="answerMeta">{suggestion.createdAt}</p>
                                 <MarkdownAnswer className="currentAnswer">
                                     {suggestion.answer}
                                 </MarkdownAnswer>
@@ -1037,16 +1066,17 @@ export default function Home() {
                                     <p className="followUp">{suggestion.followUp}</p>
                                 ) : null}
                                 <p className="currentQuestion">{suggestion.question}</p>
-                            </>
+                            </article>
                         ) : (
                             <div className="waitingFrame">
-                                <p>Waiting for the next interviewer question.</p>
+                                <p className="answerMeta">Standing by</p>
+                                <strong>Ready for the next question</strong>
                             </div>
                         )}
                     </section>
 
-                    <section className="sessionIndicator">
-                        <span>{markedQuestionAt ? `Marked ${markedQuestionAt}` : "Tap after question"}</span>
+                    <section className="sessionIndicator" aria-label="Session signal">
+                        <span>{markedQuestionAt ? `Marked ${markedQuestionAt}` : "Question not marked"}</span>
                         <span>{isProcessing ? "Analyzing" : isListening ? "Recording" : "Paused"}</span>
                         <span>{queueCount ? `${queueCount} queued` : `${levelDb ?? "--"} dB`}</span>
                     </section>
@@ -1074,333 +1104,392 @@ export default function Home() {
                     </section>
                 </main>
             ) : (
-            <main className="appShell">
-                <section className="topBar">
-                    <div>
-                        <p className="eyebrow">Live interview notes</p>
-                        <h1>Interview Helper</h1>
-                    </div>
-                    <div className={`status ${isListening ? "active" : ""}`}>
-                        <span />
-                        {status}
-                    </div>
-                </section>
+                <main className="appShell">
+                    <header className="topBar">
+                        <div>
+                            <p className="eyebrow">Interview Helper</p>
+                            <h1>Practice answers that sound like you.</h1>
+                        </div>
+                        <div className={`statusPill ${canStartInterview ? "active" : ""}`}>
+                            <span />
+                            {canStartInterview ? "Ready" : "Setup"}
+                        </div>
+                    </header>
 
-                <section className="tabBar" aria-label="Main views">
-                    <button
-                        className={activeTab === "dashboard" ? "selected" : ""}
-                        onClick={() => setActiveTab("dashboard")}
-                    >
-                        Dashboard
-                    </button>
-                    <button
-                        className={activeTab === "interview" ? "selected" : ""}
-                        onClick={() => setActiveTab("interview")}
-                    >
-                        Interview
-                    </button>
-                </section>
+                    {error ? <p className="error">{error}</p> : null}
 
-                {error ? <p className="error">{error}</p> : null}
-
-                {activeTab === "dashboard" ? (
-                    <>
-                        {!user ? (
-                            <section className="authPanel">
-                                <div className="sectionHeader">
-                                    <h2>{authMode === "signup" ? "Create account" : "Log in"}</h2>
-                                    <button
-                                        className="linkButton"
-                                        onClick={() =>
-                                            setAuthMode(authMode === "signup" ? "login" : "signup")
-                                        }
-                                    >
-                                        {authMode === "signup" ? "Use login" : "Sign up"}
-                                    </button>
-                                </div>
-                                <form onSubmit={submitAuth}>
-                                    {authMode === "signup" ? (
-                                        <label htmlFor="authName">
-                                            Name
-                                            <input
-                                                id="authName"
-                                                value={authName}
-                                                onChange={(event) => setAuthName(event.target.value)}
-                                                autoComplete="name"
-                                            />
-                                        </label>
-                                    ) : null}
-                                    <label htmlFor="authEmail">
-                                        Email
-                                        <input
-                                            id="authEmail"
-                                            type="email"
-                                            value={authEmail}
-                                            onChange={(event) => setAuthEmail(event.target.value)}
-                                            autoComplete="email"
-                                            required
-                                        />
-                                    </label>
-                                    <label htmlFor="authPassword">
-                                        Password
-                                        <input
-                                            id="authPassword"
-                                            type="password"
-                                            value={authPassword}
-                                            onChange={(event) => setAuthPassword(event.target.value)}
-                                            autoComplete={
-                                                authMode === "signup"
-                                                    ? "new-password"
-                                                    : "current-password"
-                                            }
-                                            required
-                                        />
-                                    </label>
-                                    <button className="saveButton" disabled={isAuthBusy}>
-                                        {isAuthBusy
-                                            ? "Working..."
-                                            : authMode === "signup"
-                                              ? "Create account"
-                                              : "Log in"}
-                                    </button>
-                                </form>
-                                <p className="helperText">
-                                    Each account gets its own saved profile and balance.
-                                </p>
-                            </section>
-                        ) : (
-                            <section className="accountPanel">
-                                <div>
-                                    <p className="eyebrow">Signed in</p>
-                                    <strong>{user.email}</strong>
-                                </div>
-                                <button onClick={signOut}>Log out</button>
-                            </section>
-                        )}
-
-                        <section className="balancePanel">
-                            <div>
-                                <p className="eyebrow">Available balance</p>
-                                <strong>{formatMinutes(profile.balanceMinutes)}</strong>
-                            </div>
-                            <button onClick={addTestBalance} disabled={isProfileSaving || !user}>
-                                Add {testDepositMinutes}m
-                            </button>
-                        </section>
-
-                        <section className="statsStrip">
-                            <span>{formatMinutes(profile.totalDepositedMinutes)} added</span>
-                            <span>{formatMinutes(profile.totalUsedMinutes)} used</span>
-                            <span>{isProfileLoading ? "Loading" : profileStatus || "Ready"}</span>
-                        </section>
-
-                        <section className="fieldGroup">
-                            <label htmlFor="displayName">Name</label>
-                            <input
-                                id="displayName"
-                                value={profile.displayName}
-                                onChange={(event) =>
-                                    updateProfileField("displayName", event.target.value)
-                                }
-                                placeholder="Your name"
-                                disabled={!user}
-                            />
-                        </section>
-
-                        <section className="fieldGroup">
-                            <label htmlFor="targetRole">Target role</label>
-                            <input
-                                id="targetRole"
-                                value={profile.targetRole}
-                                onChange={(event) =>
-                                    updateProfileField("targetRole", event.target.value)
-                                }
-                                placeholder="Frontend engineer, backend engineer, PM..."
-                                disabled={!user}
-                            />
-                        </section>
-
-                        <section className="fieldGroup">
-                            <label htmlFor="background">Background</label>
-                            <textarea
-                                id="background"
-                                value={profile.background}
-                                onChange={(event) =>
-                                    updateProfileField("background", event.target.value)
-                                }
-                                rows={4}
-                                placeholder="Education, current work, strengths, interests."
-                                disabled={!user}
-                            />
-                        </section>
-
-                        <section className="fieldGroup">
-                            <label htmlFor="experiences">Experiences</label>
-                            <textarea
-                                id="experiences"
-                                value={profile.experiences}
-                                onChange={(event) =>
-                                    updateProfileField("experiences", event.target.value)
-                                }
-                                rows={5}
-                                placeholder="Past roles, internships, leadership, metrics, impact."
-                                disabled={!user}
-                            />
-                        </section>
-
-                        <section className="fieldGroup">
-                            <label htmlFor="projects">Projects</label>
-                            <textarea
-                                id="projects"
-                                value={profile.projects}
-                                onChange={(event) =>
-                                    updateProfileField("projects", event.target.value)
-                                }
-                                rows={5}
-                                placeholder="Project names, tech stack, what you built, what changed."
-                                disabled={!user}
-                            />
-                        </section>
-
-                        <section className="fieldGroup">
-                            <label htmlFor="extraNotes">Extra answer notes</label>
-                            <textarea
-                                id="extraNotes"
-                                value={profile.extraNotes}
-                                onChange={(event) =>
-                                    updateProfileField("extraNotes", event.target.value)
-                                }
-                                rows={4}
-                                placeholder="Stories to emphasize, companies, constraints, or topics to avoid."
-                                disabled={!user}
-                            />
-                        </section>
-
+                    <section className="heroBand">
+                        <div className="heroCopy">
+                            <p className="eyebrow">Next session</p>
+                            <h2>{canStartInterview ? "You are ready to start." : "Finish setup before joining."}</h2>
+                            <p>
+                                {user
+                                    ? `${user.email} is signed in.`
+                                    : "Sign in to save your profile and session balance."}
+                            </p>
+                        </div>
                         <button
-                            className="saveButton"
-                            onClick={saveProfile}
-                            disabled={isProfileSaving || !user}
+                            className="primaryAction"
+                            onClick={startListening}
+                            disabled={!canStartInterview}
                         >
-                            {isProfileSaving ? "Saving..." : "Save dashboard"}
+                            Start interview
                         </button>
+                    </section>
 
-                        <p className="helperText">
-                            {user ? `Account ID: ${profile.userId}` : "Log in to edit dashboard data."}
-                        </p>
-                    </>
-                ) : (
-                    <>
-                        <section className="balancePanel compactBalance">
-                            <div>
-                                <p className="eyebrow">Remaining</p>
-                                <strong>{formatMinutes(profile.balanceMinutes)}</strong>
-                            </div>
-                            <button onClick={() => setActiveTab("dashboard")}>Dashboard</button>
-                        </section>
-
-                <section className="controls">
-                    <button
-                        className={`listenButton ${isListening ? "stop" : ""}`}
-                        onClick={isListening ? stopListening : startListening}
-                    >
-                        {isListening ? "Stop" : "Start"}
-                    </button>
-                    <div className="meter">
-                        <div className={isListening ? "pulse" : ""} />
-                        <span>
-                            {isProcessing
-                                ? "Analyzing the latest audio..."
-                                : `Ends after ${silenceEndSeconds}s silence`}
-                        </span>
-                    </div>
-                </section>
-
-                <section className="signalStrip">
-                    <span>{levelDb === null ? "Mic waiting" : `${levelDb} dB`}</span>
-                    <span>{queueCount ? `${queueCount} queued` : "Live"}</span>
-                    <span>Silence chunk</span>
-                </section>
-
-                <section className="fieldGroup">
-                    <label htmlFor="situation">Your situation</label>
-                    <textarea
-                        id="situation"
-                        value={situation}
-                        onChange={(event) => setSituation(event.target.value)}
-                        rows={5}
-                    />
-                </section>
-
-                <section className="fieldGroup compact">
-                    <label htmlFor="notes">Quick facts to use</label>
-                    <textarea
-                        id="notes"
-                        value={notes}
-                        onChange={(event) => setNotes(event.target.value)}
-                        rows={4}
-                        placeholder="Paste resume bullets, projects, company notes, or things you want the answer to mention."
-                    />
-                </section>
-
-                <section className="suggestionPanel">
-                    <div className="sectionHeader">
-                        <h2>Suggested answer</h2>
-                        {suggestion?.createdAt ? <span>{suggestion.createdAt}</span> : null}
-                    </div>
-                    {questionBuffer ? (
-                        <div className="bufferNotice">
-                            <span>Building question</span>
-                            <p>{questionBuffer}</p>
-                        </div>
-                    ) : null}
-                    {suggestion ? (
-                        <div className="suggestion">
-                            <MarkdownAnswer className="answer">
-                                {suggestion.answer}
-                            </MarkdownAnswer>
-                            {suggestion.bullets?.length ? (
-                                <ul>
-                                    {suggestion.bullets.map((bullet) => (
-                                        <li key={bullet}>{bullet}</li>
-                                    ))}
-                                </ul>
-                            ) : null}
-                            {suggestion.followUp ? (
-                                <p className="followUp">{suggestion.followUp}</p>
-                            ) : null}
-                            <p className="question">{suggestion.question}</p>
-                        </div>
-                    ) : (
-                        <p className="empty">
-                            Start listening. When Zara or another interviewer asks a question,
-                            answer notes will appear here.
-                        </p>
-                    )}
-                </section>
-
-                <section className="logPanel">
-                    <div className="sectionHeader">
-                        <h2>Recent audio</h2>
-                        <span>{logs.length}</span>
-                    </div>
-                    <div className="logList">
-                        {logs.map((log) => (
-                            <article className="logItem" key={log.id}>
+                    <section className="readinessGrid" aria-label="Readiness">
+                        {readinessItems.map((item) => (
+                            <article className={item.complete ? "readyItem complete" : "readyItem"} key={item.label}>
+                                <span />
                                 <div>
-                                    <span className={`tag ${log.type}`}>{log.label}</span>
-                                    <time>{log.createdAt}</time>
+                                    <p>{item.label}</p>
+                                    <strong>{item.value}</strong>
                                 </div>
-                                {log.question ? <p className="logQuestion">{log.question}</p> : null}
-                                {log.summary ? <p className="summary">{log.summary}</p> : null}
-                                <pre>{log.transcript}</pre>
-                                <p className="reason">{log.reason}</p>
                             </article>
                         ))}
-                    </div>
-                </section>
-                    </>
-                )}
-            </main>
+                    </section>
+
+                    <section className="tabBar" aria-label="Main views">
+                        <button
+                            className={activeTab === "dashboard" ? "selected" : ""}
+                            onClick={() => setActiveTab("dashboard")}
+                        >
+                            Setup
+                        </button>
+                        <button
+                            className={activeTab === "interview" ? "selected" : ""}
+                            onClick={() => setActiveTab("interview")}
+                        >
+                            Practice
+                        </button>
+                    </section>
+
+                    {activeTab === "dashboard" ? (
+                        <div className="dashboardLayout">
+                            <section className="sideStack">
+                                {!user ? (
+                                    <article className="panel authPanel">
+                                        <div className="sectionHeader">
+                                            <div>
+                                                <p className="eyebrow">Account</p>
+                                                <h2>
+                                                    {authMode === "signup"
+                                                        ? "Create account"
+                                                        : "Log in"}
+                                                </h2>
+                                            </div>
+                                            <button
+                                                className="linkButton"
+                                                onClick={() =>
+                                                    setAuthMode(
+                                                        authMode === "signup" ? "login" : "signup"
+                                                    )
+                                                }
+                                            >
+                                                {authMode === "signup" ? "Use login" : "Sign up"}
+                                            </button>
+                                        </div>
+                                        <form onSubmit={submitAuth}>
+                                            {authMode === "signup" ? (
+                                                <label htmlFor="authName">
+                                                    Name
+                                                    <input
+                                                        id="authName"
+                                                        value={authName}
+                                                        onChange={(event) =>
+                                                            setAuthName(event.target.value)
+                                                        }
+                                                        autoComplete="name"
+                                                    />
+                                                </label>
+                                            ) : null}
+                                            <label htmlFor="authEmail">
+                                                Email
+                                                <input
+                                                    id="authEmail"
+                                                    type="email"
+                                                    value={authEmail}
+                                                    onChange={(event) =>
+                                                        setAuthEmail(event.target.value)
+                                                    }
+                                                    autoComplete="email"
+                                                    required
+                                                />
+                                            </label>
+                                            <label htmlFor="authPassword">
+                                                Password
+                                                <input
+                                                    id="authPassword"
+                                                    type="password"
+                                                    value={authPassword}
+                                                    onChange={(event) =>
+                                                        setAuthPassword(event.target.value)
+                                                    }
+                                                    autoComplete={
+                                                        authMode === "signup"
+                                                            ? "new-password"
+                                                            : "current-password"
+                                                    }
+                                                    required
+                                                />
+                                            </label>
+                                            <button className="solidButton" disabled={isAuthBusy}>
+                                                {isAuthBusy
+                                                    ? "Working..."
+                                                    : authMode === "signup"
+                                                      ? "Create account"
+                                                      : "Log in"}
+                                            </button>
+                                        </form>
+                                    </article>
+                                ) : (
+                                    <article className="panel accountPanel">
+                                        <div>
+                                            <p className="eyebrow">Signed in</p>
+                                            <strong>{user.email}</strong>
+                                        </div>
+                                        <button onClick={signOut}>Log out</button>
+                                    </article>
+                                )}
+
+                                <article className="panel balancePanel">
+                                    <div>
+                                        <p className="eyebrow">Available time</p>
+                                        <strong>{formatMinutes(profile.balanceMinutes)}</strong>
+                                    </div>
+                                    <button onClick={addTestBalance} disabled={isProfileSaving || !user}>
+                                        Add {testDepositMinutes}m
+                                    </button>
+                                </article>
+
+                                <section className="statsStrip">
+                                    <span>{formatMinutes(profile.totalDepositedMinutes)} added</span>
+                                    <span>{formatMinutes(profile.totalUsedMinutes)} used</span>
+                                    <span>{isProfileLoading ? "Loading" : profileStatus || "Ready"}</span>
+                                </section>
+                            </section>
+
+                            <section className="panel profilePanel">
+                                <div className="sectionHeader">
+                                    <div>
+                                        <p className="eyebrow">Candidate profile</p>
+                                        <h2>Answer context</h2>
+                                    </div>
+                                    <span>{profileScore}%</span>
+                                </div>
+
+                                <div className="formGrid twoColumn">
+                                    <label htmlFor="displayName">
+                                        Name
+                                        <input
+                                            id="displayName"
+                                            value={profile.displayName}
+                                            onChange={(event) =>
+                                                updateProfileField("displayName", event.target.value)
+                                            }
+                                            placeholder="Your name"
+                                            disabled={!user}
+                                        />
+                                    </label>
+                                    <label htmlFor="targetRole">
+                                        Target role
+                                        <input
+                                            id="targetRole"
+                                            value={profile.targetRole}
+                                            onChange={(event) =>
+                                                updateProfileField("targetRole", event.target.value)
+                                            }
+                                            placeholder="Frontend engineer"
+                                            disabled={!user}
+                                        />
+                                    </label>
+                                </div>
+
+                                <div className="formGrid">
+                                    <label htmlFor="background">
+                                        Background
+                                        <textarea
+                                            id="background"
+                                            value={profile.background}
+                                            onChange={(event) =>
+                                                updateProfileField("background", event.target.value)
+                                            }
+                                            rows={4}
+                                            placeholder="Education, current work, strengths, interests."
+                                            disabled={!user}
+                                        />
+                                    </label>
+                                    <label htmlFor="experiences">
+                                        Experiences
+                                        <textarea
+                                            id="experiences"
+                                            value={profile.experiences}
+                                            onChange={(event) =>
+                                                updateProfileField("experiences", event.target.value)
+                                            }
+                                            rows={5}
+                                            placeholder="Roles, internships, leadership, metrics, impact."
+                                            disabled={!user}
+                                        />
+                                    </label>
+                                    <label htmlFor="projects">
+                                        Projects
+                                        <textarea
+                                            id="projects"
+                                            value={profile.projects}
+                                            onChange={(event) =>
+                                                updateProfileField("projects", event.target.value)
+                                            }
+                                            rows={5}
+                                            placeholder="Project names, stack, what you built, what changed."
+                                            disabled={!user}
+                                        />
+                                    </label>
+                                    <label htmlFor="extraNotes">
+                                        Extra answer notes
+                                        <textarea
+                                            id="extraNotes"
+                                            value={profile.extraNotes}
+                                            onChange={(event) =>
+                                                updateProfileField("extraNotes", event.target.value)
+                                            }
+                                            rows={4}
+                                            placeholder="Stories to emphasize, companies, constraints, or topics to avoid."
+                                            disabled={!user}
+                                        />
+                                    </label>
+                                </div>
+
+                                <button
+                                    className="solidButton wide"
+                                    onClick={saveProfile}
+                                    disabled={isProfileSaving || !user}
+                                >
+                                    {isProfileSaving ? "Saving..." : "Save profile"}
+                                </button>
+                            </section>
+                        </div>
+                    ) : (
+                        <div className="practiceLayout">
+                            <section className="panel launchPanel">
+                                <div>
+                                    <p className="eyebrow">Practice room</p>
+                                    <h2>Run a live answer session</h2>
+                                    <p>
+                                        {canStartInterview
+                                            ? `Remaining time: ${formatMinutes(profile.balanceMinutes)}`
+                                            : "Add an account and minutes before starting."}
+                                    </p>
+                                </div>
+                                <button
+                                    className="primaryAction"
+                                    onClick={startListening}
+                                    disabled={!canStartInterview}
+                                >
+                                    Start
+                                </button>
+                            </section>
+
+                            <section className="signalStrip">
+                                <span>{levelDb === null ? "Mic waiting" : `${levelDb} dB`}</span>
+                                <span>{queueCount ? `${queueCount} queued` : "Live"}</span>
+                                <span>{isProcessing ? "Analyzing" : `${silenceEndSeconds}s silence`}</span>
+                            </section>
+
+                            <section className="panel">
+                                <div className="sectionHeader">
+                                    <div>
+                                        <p className="eyebrow">Session context</p>
+                                        <h2>Prompt memory</h2>
+                                    </div>
+                                </div>
+                                <div className="formGrid">
+                                    <label htmlFor="situation">
+                                        Your situation
+                                        <textarea
+                                            id="situation"
+                                            value={situation}
+                                            onChange={(event) => setSituation(event.target.value)}
+                                            rows={5}
+                                        />
+                                    </label>
+                                    <label htmlFor="notes">
+                                        Quick facts to use
+                                        <textarea
+                                            id="notes"
+                                            value={notes}
+                                            onChange={(event) => setNotes(event.target.value)}
+                                            rows={4}
+                                            placeholder="Paste resume bullets, projects, company notes, or points to mention."
+                                        />
+                                    </label>
+                                </div>
+                            </section>
+
+                            <section className="panel suggestionPanel">
+                                <div className="sectionHeader">
+                                    <div>
+                                        <p className="eyebrow">Output</p>
+                                        <h2>Suggested answer</h2>
+                                    </div>
+                                    {suggestion?.createdAt ? <span>{suggestion.createdAt}</span> : null}
+                                </div>
+                                {questionBuffer ? (
+                                    <div className="bufferNotice">
+                                        <span>Building question</span>
+                                        <p>{questionBuffer}</p>
+                                    </div>
+                                ) : null}
+                                {suggestion ? (
+                                    <div className="suggestion">
+                                        <MarkdownAnswer className="answer">
+                                            {suggestion.answer}
+                                        </MarkdownAnswer>
+                                        {suggestion.bullets?.length ? (
+                                            <ul>
+                                                {suggestion.bullets.map((bullet) => (
+                                                    <li key={bullet}>{bullet}</li>
+                                                ))}
+                                            </ul>
+                                        ) : null}
+                                        {suggestion.followUp ? (
+                                            <p className="followUp">{suggestion.followUp}</p>
+                                        ) : null}
+                                        <p className="question">{suggestion.question}</p>
+                                    </div>
+                                ) : (
+                                    <p className="empty">Your next generated answer will appear here.</p>
+                                )}
+                            </section>
+
+                            <section className="panel logPanel">
+                                <div className="sectionHeader">
+                                    <div>
+                                        <p className="eyebrow">History</p>
+                                        <h2>Recent audio</h2>
+                                    </div>
+                                    <span>{logs.length}</span>
+                                </div>
+                                <div className="logList">
+                                    {logs.map((log) => (
+                                        <article className="logItem" key={log.id}>
+                                            <div>
+                                                <span className={`tag ${log.type}`}>{log.label}</span>
+                                                <time>{log.createdAt}</time>
+                                            </div>
+                                            {log.question ? (
+                                                <p className="logQuestion">{log.question}</p>
+                                            ) : null}
+                                            {log.summary ? <p className="summary">{log.summary}</p> : null}
+                                            <pre>{log.transcript}</pre>
+                                            <p className="reason">{log.reason}</p>
+                                        </article>
+                                    ))}
+                                </div>
+                            </section>
+                        </div>
+                    )}
+                </main>
             )}
 
             <style jsx>{`
@@ -2168,6 +2257,532 @@ export default function Home() {
 
                     .controls {
                         grid-template-columns: 106px 1fr;
+                    }
+                }
+
+                :global(html),
+                :global(body),
+                :global(#__next) {
+                    background: #f7f8f6;
+                    color: #16211f;
+                }
+
+                :global(button) {
+                    cursor: pointer;
+                }
+
+                :global(button:disabled) {
+                    cursor: not-allowed;
+                }
+
+                .appShell {
+                    width: min(100%, 1120px);
+                    min-height: 100svh;
+                    padding: max(28px, env(safe-area-inset-top)) 22px
+                        max(36px, env(safe-area-inset-bottom));
+                }
+
+                .topBar {
+                    align-items: center;
+                    padding: 8px 0 22px;
+                }
+
+                .eyebrow {
+                    color: #60706a;
+                    font-size: 0.73rem;
+                    letter-spacing: 0;
+                }
+
+                h1 {
+                    max-width: 720px;
+                    color: #111b19;
+                    font-size: 2.65rem;
+                    line-height: 1.04;
+                    letter-spacing: 0;
+                }
+
+                h2 {
+                    color: #14201e;
+                    font-size: 1.08rem;
+                    line-height: 1.22;
+                    letter-spacing: 0;
+                }
+
+                .statusPill {
+                    flex: 0 0 auto;
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 8px;
+                    min-height: 38px;
+                    padding: 8px 12px;
+                    border: 1px solid #d6ddd8;
+                    border-radius: 8px;
+                    background: #ffffff;
+                    color: #50605b;
+                    font-size: 0.82rem;
+                    font-weight: 850;
+                    box-shadow: 0 8px 22px rgba(25, 35, 32, 0.05);
+                }
+
+                .statusPill span {
+                    width: 8px;
+                    height: 8px;
+                    border-radius: 999px;
+                    background: #9ca8a3;
+                }
+
+                .statusPill.active span {
+                    background: #15935c;
+                    box-shadow: 0 0 0 4px rgba(21, 147, 92, 0.13);
+                }
+
+                .heroBand {
+                    display: grid;
+                    grid-template-columns: minmax(0, 1fr) auto;
+                    align-items: end;
+                    gap: 18px;
+                    margin-bottom: 14px;
+                    padding: 22px;
+                    border: 1px solid #cfd9d3;
+                    border-radius: 8px;
+                    background: #ffffff;
+                    box-shadow: 0 18px 44px rgba(23, 36, 32, 0.08);
+                }
+
+                .heroCopy {
+                    display: grid;
+                    gap: 8px;
+                }
+
+                .heroCopy h2 {
+                    font-size: 1.6rem;
+                }
+
+                .heroCopy p:not(.eyebrow),
+                .launchPanel p {
+                    color: #53635e;
+                    font-size: 0.95rem;
+                    line-height: 1.45;
+                }
+
+                .primaryAction,
+                .solidButton,
+                .balancePanel button,
+                .accountPanel button,
+                .linkButton {
+                    min-height: 44px;
+                    border: 0;
+                    border-radius: 8px;
+                    font: inherit;
+                    font-weight: 900;
+                }
+
+                .primaryAction {
+                    min-width: 176px;
+                    min-height: 58px;
+                    padding: 0 22px;
+                    background: #145443;
+                    color: #ffffff;
+                    box-shadow: 0 16px 34px rgba(20, 84, 67, 0.22);
+                }
+
+                .primaryAction:disabled,
+                .solidButton:disabled,
+                .balancePanel button:disabled {
+                    opacity: 0.54;
+                    box-shadow: none;
+                }
+
+                .primaryAction:disabled {
+                    background: #d9e0dc;
+                    color: #52615c;
+                    opacity: 1;
+                }
+
+                .solidButton,
+                .balancePanel button {
+                    padding: 0 16px;
+                    background: #145443;
+                    color: #ffffff;
+                }
+
+                .solidButton.wide {
+                    width: 100%;
+                    margin-top: 16px;
+                }
+
+                .readinessGrid {
+                    display: grid;
+                    grid-template-columns: repeat(3, minmax(0, 1fr));
+                    gap: 10px;
+                    margin-bottom: 14px;
+                }
+
+                .readyItem {
+                    display: flex;
+                    align-items: center;
+                    gap: 12px;
+                    min-width: 0;
+                    min-height: 72px;
+                    padding: 14px;
+                    border: 1px solid #d6ddd8;
+                    border-radius: 8px;
+                    background: #ffffff;
+                }
+
+                .readyItem > span {
+                    width: 12px;
+                    height: 12px;
+                    flex: 0 0 auto;
+                    border-radius: 999px;
+                    background: #c6cec9;
+                }
+
+                .readyItem.complete > span {
+                    background: #15935c;
+                }
+
+                .readyItem p {
+                    color: #60706a;
+                    font-size: 0.76rem;
+                    font-weight: 850;
+                    text-transform: uppercase;
+                }
+
+                .readyItem strong {
+                    display: block;
+                    overflow-wrap: anywhere;
+                    margin-top: 3px;
+                    color: #16211f;
+                    font-size: 1rem;
+                    line-height: 1.2;
+                }
+
+                .tabBar {
+                    max-width: 420px;
+                    margin-bottom: 18px;
+                    border-color: #d6ddd8;
+                    background: #eef2ef;
+                }
+
+                .tabBar .selected {
+                    background: #172522;
+                }
+
+                .dashboardLayout {
+                    display: grid;
+                    grid-template-columns: minmax(280px, 0.78fr) minmax(0, 1.65fr);
+                    align-items: start;
+                    gap: 16px;
+                }
+
+                .practiceLayout,
+                .sideStack {
+                    display: grid;
+                    gap: 14px;
+                }
+
+                .panel {
+                    padding: 18px;
+                    border: 1px solid #d6ddd8;
+                    border-radius: 8px;
+                    background: #ffffff;
+                    box-shadow: 0 12px 34px rgba(23, 36, 32, 0.06);
+                }
+
+                .authPanel,
+                .accountPanel,
+                .balancePanel,
+                .suggestionPanel,
+                .logPanel {
+                    margin-bottom: 0;
+                }
+
+                .authPanel form,
+                .formGrid {
+                    display: grid;
+                    gap: 14px;
+                }
+
+                .twoColumn {
+                    grid-template-columns: repeat(2, minmax(0, 1fr));
+                    margin-bottom: 14px;
+                }
+
+                .sectionHeader {
+                    margin-bottom: 16px;
+                }
+
+                .sectionHeader span {
+                    color: #52615c;
+                    font-weight: 900;
+                }
+
+                .accountPanel,
+                .balancePanel,
+                .launchPanel {
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    gap: 16px;
+                }
+
+                .accountPanel strong {
+                    color: #172522;
+                    font-size: 1rem;
+                }
+
+                .accountPanel button,
+                .linkButton {
+                    padding: 0 14px;
+                    background: #e9eeea;
+                    color: #263632;
+                }
+
+                .balancePanel {
+                    background: #eff8f3;
+                    border-color: #c8dfd3;
+                }
+
+                .balancePanel strong {
+                    color: #145443;
+                    font-size: 2.35rem;
+                }
+
+                .statsStrip {
+                    margin-bottom: 0;
+                }
+
+                .statsStrip span,
+                .signalStrip span,
+                .sessionIndicator span {
+                    border-color: #d6ddd8;
+                    background: #ffffff;
+                    color: #53635e;
+                }
+
+                label {
+                    margin-bottom: 0;
+                    color: #2d3d38;
+                    font-size: 0.86rem;
+                }
+
+                input,
+                textarea {
+                    margin-top: 8px;
+                    border-color: #cfd8d3;
+                    background: #fbfcfb;
+                }
+
+                textarea {
+                    min-height: 116px;
+                }
+
+                input:focus,
+                textarea:focus {
+                    border-color: #145443;
+                    outline-color: rgba(20, 84, 67, 0.16);
+                }
+
+                .launchPanel {
+                    background: #172522;
+                    color: #ffffff;
+                }
+
+                .launchPanel h2,
+                .launchPanel .eyebrow {
+                    color: #ffffff;
+                }
+
+                .launchPanel p {
+                    color: #c6d2ce;
+                }
+
+                .launchPanel .primaryAction {
+                    background: #ffffff;
+                    color: #172522;
+                    box-shadow: none;
+                }
+
+                .signalStrip {
+                    margin: 0;
+                }
+
+                .suggestion,
+                .logList {
+                    gap: 12px;
+                }
+
+                .bufferNotice {
+                    border-color: #c8dfd3;
+                    background: #eff8f3;
+                }
+
+                .answer {
+                    font-size: 1.02rem;
+                }
+
+                .empty,
+                .reason,
+                .followUp {
+                    color: #60706a;
+                }
+
+                .question,
+                .currentQuestion {
+                    color: #145443;
+                }
+
+                .logItem {
+                    border-color: #dce3df;
+                    background: #fbfcfb;
+                }
+
+                .error {
+                    border-color: #efc2b8;
+                    background: #fff3ef;
+                    color: #942f22;
+                }
+
+                .sessionShell {
+                    width: min(100%, 820px);
+                    background: #f7f8f6;
+                    gap: 14px;
+                }
+
+                .sessionTop {
+                    position: static;
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    gap: 16px;
+                    padding: 14px 0 4px;
+                    border: 0;
+                    background: transparent;
+                    backdrop-filter: none;
+                }
+
+                .sessionTop h1 {
+                    font-size: 2.25rem;
+                    line-height: 1.05;
+                }
+
+                .answerFrame {
+                    border-color: #d6ddd8;
+                    background: #ffffff;
+                    box-shadow: 0 18px 44px rgba(23, 36, 32, 0.08);
+                }
+
+                .answerContent {
+                    display: grid;
+                    gap: 14px;
+                }
+
+                .answerMeta {
+                    color: #60706a;
+                    font-size: 0.8rem;
+                    font-weight: 850;
+                    text-transform: uppercase;
+                }
+
+                .currentAnswer {
+                    font-size: 1.35rem;
+                    line-height: 1.45;
+                }
+
+                .waitingFrame {
+                    min-height: 48svh;
+                    gap: 8px;
+                }
+
+                .waitingFrame strong {
+                    color: #172522;
+                    font-size: 1.55rem;
+                    line-height: 1.2;
+                }
+
+                .sessionBottom {
+                    position: sticky;
+                    bottom: max(14px, env(safe-area-inset-bottom));
+                    border-color: #d6ddd8;
+                    background: rgba(247, 248, 246, 0.95);
+                }
+
+                .questionMarkButton {
+                    background: #145443;
+                }
+
+                .sessionControls strong {
+                    color: #145443;
+                }
+
+                .sessionControls button {
+                    background: #172522;
+                }
+
+                .sessionControls .stopSession {
+                    background: #b83d32;
+                }
+
+                @media (max-width: 820px) {
+                    .appShell {
+                        width: min(100%, 620px);
+                    }
+
+                    h1 {
+                        font-size: 2.05rem;
+                    }
+
+                    .heroBand,
+                    .dashboardLayout,
+                    .twoColumn {
+                        grid-template-columns: 1fr;
+                    }
+
+                    .heroBand,
+                    .launchPanel {
+                        align-items: stretch;
+                    }
+
+                    .primaryAction {
+                        width: 100%;
+                    }
+                }
+
+                @media (max-width: 560px) {
+                    .appShell,
+                    .sessionShell {
+                        padding-inline: 14px;
+                    }
+
+                    .topBar {
+                        align-items: flex-start;
+                    }
+
+                    .readinessGrid,
+                    .statsStrip,
+                    .signalStrip,
+                    .sessionIndicator {
+                        grid-template-columns: 1fr;
+                    }
+
+                    .heroBand,
+                    .panel {
+                        padding: 16px;
+                    }
+
+                    .accountPanel,
+                    .balancePanel,
+                    .launchPanel,
+                    .sessionControls {
+                        grid-template-columns: 1fr;
+                        display: grid;
+                    }
+
+                    .accountPanel button,
+                    .balancePanel button,
+                    .sessionControls button {
+                        width: 100%;
                     }
                 }
             `}</style>
