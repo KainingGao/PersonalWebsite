@@ -1023,7 +1023,6 @@ export default function Home() {
                     <section className="answerFrame">
                         {suggestion ? (
                             <>
-                                <p className="currentQuestion">{suggestion.question}</p>
                                 <MarkdownAnswer className="currentAnswer">
                                     {suggestion.answer}
                                 </MarkdownAnswer>
@@ -1037,6 +1036,7 @@ export default function Home() {
                                 {suggestion.followUp ? (
                                     <p className="followUp">{suggestion.followUp}</p>
                                 ) : null}
+                                <p className="currentQuestion">{suggestion.question}</p>
                             </>
                         ) : (
                             <div className="waitingFrame">
@@ -1355,7 +1355,6 @@ export default function Home() {
                     ) : null}
                     {suggestion ? (
                         <div className="suggestion">
-                            <p className="question">{suggestion.question}</p>
                             <MarkdownAnswer className="answer">
                                 {suggestion.answer}
                             </MarkdownAnswer>
@@ -1369,6 +1368,7 @@ export default function Home() {
                             {suggestion.followUp ? (
                                 <p className="followUp">{suggestion.followUp}</p>
                             ) : null}
+                            <p className="question">{suggestion.question}</p>
                         </div>
                     ) : (
                         <p className="empty">
